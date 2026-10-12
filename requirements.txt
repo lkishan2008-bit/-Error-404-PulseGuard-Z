@@ -1,0 +1,8 @@
+torch
+numpy
+pandas
+scikit-learn
+fastapi
+uvicorn
+pydantic
+python-dotenv
