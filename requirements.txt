@@ -5,8 +5,8 @@
 # Phase 1 (data generation + charts)
 #   numpy, pandas, matplotlib
 #
-# Phase 2+ (model, backend, frontend) - listed here for
-# completeness but NOT needed for Phase 1.
+# Phase 2 (TGNN training + evaluation)
+#   torch (CPU), scikit-learn
 # ============================================================
 
 # --- Phase 1: data generation & visualisation ---------------
@@ -14,11 +14,11 @@ numpy>=1.26.0
 pandas>=2.2.0
 matplotlib>=3.8.0
 
-# --- Phase 2: ML / TGNN  (not used in Phase 1) -------------
-# torch>=2.2.0
-# scikit-learn>=1.4.0
+# --- Phase 2: ML / TGNN ------------------------------------
+torch>=2.2.0
+scikit-learn>=1.4.0
 
-# --- Phase 3: API backend  (not used in Phase 1) -----------
+# --- Phase 3: API backend  (not used yet) ------------------
 # fastapi>=0.110.0
 # uvicorn[standard]>=0.29.0
 # pydantic>=2.6.0
