@@ -55,8 +55,9 @@ import pandas as pd
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, status
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
+
 
 # ---------------------------------------------------------------------------
 # Project Root & Path Setup (Always relative to project root)
@@ -342,6 +343,41 @@ class AccountDetailResponse(BaseModel):
     statistics: Dict[str, Any]
     investigation: Dict[str, Any]
     recent_transactions: List[TransactionItem]
+
+
+class GraphNodeItem(BaseModel):
+    id: str
+    label: str
+    account_type: str
+    tgnn_score: float
+    is_flagged: bool
+    rule_flagged: int
+    is_fraud_account: int
+    risk_level: str
+    top_signals: List[str]
+
+
+class GraphEdgeItem(BaseModel):
+    id: str
+    source: str
+    target: str
+    amount: float
+    tx_type: str
+    is_fraud: int
+    timestamp: str
+
+
+class GraphResponse(BaseModel):
+    nodes: List[GraphNodeItem]
+    edges: List[GraphEdgeItem]
+    nodes_count: int
+    edges_count: int
+    flagged_nodes_count: int
+    fraud_edges_count: int
+    threshold: float
+    focus_account_id: Optional[str]
+    data_notice: str
+
 
 
 # ---------------------------------------------------------------------------
@@ -953,9 +989,210 @@ def get_account_explanation(
     return narrative
 
 
+@router.get(
+    "/graph",
+    response_model=GraphResponse,
+    summary="Bounded transaction network graph for visualization",
+    tags=["Graph"],
+)
+def get_graph(
+    threshold: float = Query(
+        default=DEFAULT_RISK_THRESHOLD,
+        ge=0.0,
+        le=1.0,
+        description="Calibrated TGNN decision threshold (default: 0.20).",
+    ),
+    focus_account_id: Optional[str] = Query(
+        default=None,
+        description="Optional account ID to center an ego-network graph around.",
+    ),
+    max_nodes: int = Query(
+        default=50,
+        ge=5,
+        le=150,
+        description="Maximum nodes in returned subgraph.",
+    ),
+    max_edges: int = Query(
+        default=100,
+        ge=5,
+        le=300,
+        description="Maximum edges in returned subgraph.",
+    ),
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """
+    Returns a bounded, high-fidelity transaction network graph for Cytoscape.js visualization.
+    Extracts real accounts and transactions, linking high-risk nodes and their counterparties.
+    """
+    repo.ensure_ready()
+    txns = repo.transactions_df
+    m_df = repo.merged_accounts_df
+
+    if focus_account_id:
+        aid = focus_account_id.strip()
+        if aid not in repo.account_map:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account '{aid}' does not exist in dataset.",
+            )
+        sent_indices = repo.account_sent_tx_map.get(aid, [])
+        recv_indices = repo.account_recv_tx_map.get(aid, [])
+        all_indices = sent_indices + recv_indices
+
+        if all_indices:
+            focus_tx_df = txns.iloc[all_indices]
+            senders = focus_tx_df["sender_id"].unique().tolist()
+            receivers = focus_tx_df["receiver_id"].unique().tolist()
+            counterparties = list((set(senders) | set(receivers)) - {aid})
+
+            cp_scored = []
+            for cp in counterparties:
+                cp_score = float(repo.score_map.get(cp, {}).get("tgnn_score", 0.0))
+                cp_has_fraud = int((focus_tx_df[(focus_tx_df["sender_id"] == cp) | (focus_tx_df["receiver_id"] == cp)]["is_fraud"] == 1).sum())
+                cp_scored.append((cp, cp_has_fraud, cp_score))
+
+            cp_scored.sort(key=lambda x: (x[1], x[2]), reverse=True)
+            chosen_cps = [x[0] for x in cp_scored[: max_nodes - 1]]
+            selected_ids = [aid] + chosen_cps
+        else:
+            selected_ids = [aid]
+
+        selected_set = set(selected_ids)
+        sub_tx_mask = txns["sender_id"].isin(selected_set) & txns["receiver_id"].isin(selected_set)
+        sub_tx = (
+            txns[sub_tx_mask]
+            .sort_values(by=["is_fraud", "amount"], ascending=[False, False])
+            .head(max_edges)
+        )
+    else:
+        # Global view: Focus on top suspicious accounts and their direct/high-value counterparties
+        suspicious_list = m_df.head(min(25, max_nodes // 2))["account_id"].tolist()
+        suspicious_set = set(suspicious_list)
+
+        # 1. Direct transactions between top suspicious accounts
+        direct_mask = txns["sender_id"].isin(suspicious_set) & txns["receiver_id"].isin(suspicious_set)
+        direct_tx = txns[direct_mask]
+
+        # 2. Fraud transactions incident to suspicious accounts
+        fraud_mask = (
+            txns["sender_id"].isin(suspicious_set) | txns["receiver_id"].isin(suspicious_set)
+        ) & (txns["is_fraud"] == 1)
+        fraud_tx = txns[fraud_mask]
+
+        # 3. High-volume normal transactions to connect legitimate counterparties (merchants, etc.)
+        normal_mask = (
+            txns["sender_id"].isin(suspicious_set) | txns["receiver_id"].isin(suspicious_set)
+        ) & (txns["is_fraud"] == 0)
+        normal_tx = txns[normal_mask].sort_values(by="amount", ascending=False).head(40)
+
+        combined_tx = pd.concat([direct_tx, fraud_tx, normal_tx]).drop_duplicates(subset=["transaction_id"])
+        sorted_tx = combined_tx.sort_values(by=["is_fraud", "amount"], ascending=[False, False]).head(max_edges)
+
+        nodes_in_edges = set(sorted_tx["sender_id"]).union(set(sorted_tx["receiver_id"]))
+        selected_set = nodes_in_edges.union(suspicious_set)
+
+        if len(selected_set) > max_nodes:
+            # Retain top suspicious plus highest-degree counterparties
+            sender_counts = sorted_tx["sender_id"].value_counts()
+            receiver_counts = sorted_tx["receiver_id"].value_counts()
+            total_counts = (sender_counts.add(receiver_counts, fill_value=0)).to_dict()
+
+            sorted_nodes = sorted(
+                list(selected_set),
+                key=lambda x: (x in suspicious_set, total_counts.get(x, 0)),
+                reverse=True,
+            )
+            selected_set = set(sorted_nodes[:max_nodes])
+            sorted_tx = sorted_tx[
+                sorted_tx["sender_id"].isin(selected_set) & sorted_tx["receiver_id"].isin(selected_set)
+            ]
+
+        sub_tx = sorted_tx
+
+    # Build node objects
+    node_items = []
+    flagged_nodes_count = 0
+    for nid in selected_set:
+        acct_row = repo.account_map.get(nid, {})
+        score_row = repo.score_map.get(nid, {})
+        t_score = float(score_row.get("tgnn_score", 0.0))
+        r_flag = int(score_row.get("rule_flagged", 0))
+        is_flagged = bool((t_score >= threshold) or (r_flag == 1))
+        if is_flagged:
+            flagged_nodes_count += 1
+
+        sigs = [
+            score_row.get("top_signal_1", "none"),
+            score_row.get("top_signal_2", "none"),
+            score_row.get("top_signal_3", "none"),
+        ]
+        clean_sigs = [s for s in sigs if s and s != "none"]
+
+        node_items.append(
+            GraphNodeItem(
+                id=nid,
+                label=nid,
+                account_type=acct_row.get("account_type", "unknown"),
+                tgnn_score=round(t_score, 4),
+                is_flagged=is_flagged,
+                rule_flagged=r_flag,
+                is_fraud_account=int(acct_row.get("is_fraud_account", 0)),
+                risk_level=assess_risk_level(t_score, threshold, bool(r_flag)),
+                top_signals=clean_sigs,
+            )
+        )
+
+    # Sort nodes: flagged first, then by score descending
+    node_items.sort(key=lambda n: (n.is_flagged, n.tgnn_score), reverse=True)
+
+    # Build edge objects
+    edge_items = []
+    fraud_edges_count = 0
+    for row in sub_tx.to_dict(orient="records"):
+        is_f = int(row["is_fraud"])
+        if is_f == 1:
+            fraud_edges_count += 1
+        edge_items.append(
+            GraphEdgeItem(
+                id=row["transaction_id"],
+                source=row["sender_id"],
+                target=row["receiver_id"],
+                amount=round(float(row["amount"]), 2),
+                tx_type=row["tx_type"],
+                is_fraud=is_f,
+                timestamp=row["timestamp"],
+            )
+        )
+
+    return GraphResponse(
+        nodes=node_items,
+        edges=edge_items,
+        nodes_count=len(node_items),
+        edges_count=len(edge_items),
+        flagged_nodes_count=flagged_nodes_count,
+        fraud_edges_count=fraud_edges_count,
+        threshold=threshold,
+        focus_account_id=focus_account_id,
+        data_notice="Bounded real transaction network extracted from transactions.csv and scores.csv.",
+    )
+
+
 # Mount router for both `/api/...` and top-level `/...` paths
 app.include_router(router, prefix="/api")
 app.include_router(router, prefix="")
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/dashboard", include_in_schema=False)
+def serve_dashboard():
+    """
+    Serves the Phase 4 Cytoscape.js frontend dashboard.
+    """
+    index_file = REPO_ROOT / "frontend" / "index.html"
+    if index_file.is_file():
+        return FileResponse(index_file)
+    return JSONResponse({"status": "PulseGuard-Z backend active. Frontend file not found."})
+
 
 
 # Custom global exception handler for clean error reporting

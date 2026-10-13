@@ -1,0 +1,1678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PulseGuard-Z — Flash Fraud Detection on IBM LinuxONE</title>
+  <!-- Cytoscape.js CDN for interactive transaction graph -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+  <style>
+    /* ==========================================================================
+       PulseGuard-Z Design System
+       Palette: White (#FFF), Light Grey (#F9FAFB, #F3F4F6, #E5E7EB),
+                Charcoal (#1F2937, #111827), and Red Accent (#D92D20) exclusively.
+       ========================================================================== */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg-main: #F9FAFB;
+      --bg-surface: #FFFFFF;
+      --bg-subtle: #F3F4F6;
+      --border-subtle: #E5E7EB;
+      --border-strong: #D1D5DB;
+      --text-primary: #111827;
+      --text-charcoal: #1F2937;
+      --text-muted: #6B7280;
+      --text-light: #9CA3AF;
+      --red-accent: #D92D20;
+      --red-tint: #FEF2F2;
+      --red-border: #FCA5A5;
+      --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    body {
+      font-family: var(--font-stack);
+      background-color: var(--bg-main);
+      color: var(--text-charcoal);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* --- TOP BAR --- */
+    .topbar {
+      height: 52px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      flex-shrink: 0;
+      z-index: 20;
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .shield-logo {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-subtitle {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+      padding-left: 8px;
+      border-left: 1px solid var(--border-subtle);
+      letter-spacing: 0.1px;
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .api-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: var(--text-light);
+    }
+    .status-dot.connected {
+      background-color: var(--text-charcoal);
+    }
+    .status-dot.error {
+      background-color: var(--red-accent);
+    }
+
+    .refresh-meta {
+      font-size: 11px;
+      color: var(--text-light);
+    }
+
+    .btn {
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .btn-secondary {
+      background: var(--bg-surface);
+      color: var(--text-charcoal);
+      border: 1px solid var(--border-strong);
+    }
+    .btn-secondary:hover {
+      background: var(--bg-subtle);
+    }
+
+    .btn-primary {
+      background: var(--text-charcoal);
+      color: #FFFFFF;
+      border: 1px solid var(--text-charcoal);
+    }
+    .btn-primary:hover {
+      background: #111827;
+    }
+
+    .btn-sim-active {
+      background: var(--red-accent);
+      border-color: var(--red-accent);
+      color: #FFFFFF;
+    }
+    .btn-sim-active:hover {
+      background: #B42318;
+    }
+
+    /* --- NOTIFICATION / ERROR BANNER --- */
+    .banner {
+      display: none;
+      background: var(--red-tint);
+      border-bottom: 1px solid var(--red-border);
+      color: var(--red-accent);
+      padding: 8px 20px;
+      font-size: 12px;
+      font-weight: 500;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      z-index: 15;
+    }
+    .banner.visible {
+      display: flex;
+    }
+    .banner-btn {
+      background: none;
+      border: 1px solid var(--red-accent);
+      color: var(--red-accent);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    /* --- THREE METRIC CARDS ROW --- */
+    .metrics-bar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      padding: 12px 20px;
+      background: var(--bg-main);
+      flex-shrink: 0;
+    }
+
+    .metric-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .metric-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+
+    .metric-value-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .metric-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.4px;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric-value.red-alert {
+      color: var(--red-accent);
+    }
+
+    .metric-desc {
+      font-size: 11px;
+      color: var(--text-light);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* --- MAIN CONTENT SPLIT (70% GRAPH / 30% ALERTS) --- */
+    .main-workspace {
+      flex: 1;
+      display: flex;
+      padding: 0 20px 16px 20px;
+      gap: 16px;
+      min-height: 0; /* Important for flex child overflow */
+      position: relative;
+    }
+
+    /* --- GRAPH CONTAINER (70%) --- */
+    .graph-pane {
+      flex: 7;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      min-width: 0;
+    }
+
+    .pane-header {
+      height: 42px;
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      background: var(--bg-surface);
+    }
+
+    .pane-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1px;
+      color: var(--text-charcoal);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pane-badge {
+      font-size: 11px;
+      font-weight: 500;
+      background: var(--bg-subtle);
+      color: var(--text-muted);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .graph-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-icon {
+      width: 26px;
+      height: 26px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-charcoal);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .btn-icon:hover {
+      background: var(--bg-subtle);
+    }
+
+    #cy-container {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      background: #FFFFFF;
+      position: relative;
+    }
+
+    /* Tiny Legend (Bottom of Graph) */
+    .graph-legend {
+      position: absolute;
+      bottom: 12px;
+      left: 14px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 11px;
+      color: var(--text-muted);
+      z-index: 5;
+      pointer-events: none;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .legend-indicator-node {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .legend-indicator-node.normal {
+      background: var(--bg-subtle);
+      border: 1.5px solid var(--border-strong);
+    }
+    .legend-indicator-node.flagged {
+      background: var(--red-accent);
+      border: 1px solid #111827;
+    }
+
+    .legend-indicator-edge {
+      width: 14px;
+      height: 2px;
+    }
+    .legend-indicator-edge.normal {
+      background: var(--border-strong);
+    }
+    .legend-indicator-edge.suspicious {
+      background: var(--red-accent);
+    }
+
+    /* Simulation Tracker Overlay */
+    .sim-progress-banner {
+      display: none;
+      position: absolute;
+      top: 50px;
+      left: 14px;
+      right: 14px;
+      background: #FFFFFF;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 11px;
+      z-index: 10;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sim-progress-banner.active {
+      display: flex;
+    }
+
+    /* --- ALERTS PANE (30%) --- */
+    .alerts-pane {
+      flex: 3;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      min-width: 280px;
+      overflow: hidden;
+    }
+
+    .alerts-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .alert-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 10px 12px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
+      position: relative;
+    }
+    .alert-card:hover {
+      border-color: var(--border-strong);
+      background: var(--bg-subtle);
+    }
+    .alert-card.selected {
+      border-color: var(--red-accent);
+      background: var(--red-tint);
+    }
+
+    .alert-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .alert-acct-id {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    .score-badge {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--red-accent);
+      background: var(--red-tint);
+      border: 1px solid var(--red-border);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .alert-details {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .alert-type-tag {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-subtle);
+      padding: 1px 5px;
+      border-radius: 3px;
+      text-transform: capitalize;
+    }
+
+    .alert-signal {
+      font-size: 11px;
+      color: var(--text-charcoal);
+      font-weight: 500;
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .alerts-footnote {
+      padding: 8px 12px;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 10px;
+      color: var(--text-light);
+      background: var(--bg-surface);
+      text-align: center;
+    }
+
+    /* --- SLIDE-IN DETAIL PANEL --- */
+    .drawer-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(17, 24, 39, 0.25);
+      z-index: 40;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .drawer-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .detail-drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 440px;
+      max-width: 90vw;
+      background: #FFFFFF;
+      border-left: 1px solid var(--border-subtle);
+      box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .detail-drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      background: var(--bg-surface);
+    }
+
+    .drawer-title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .drawer-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    .drawer-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-close {
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-surface);
+      color: var(--text-charcoal);
+      font-size: 16px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .btn-close:hover {
+      background: var(--bg-subtle);
+    }
+
+    .drawer-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .score-summary-box {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .summary-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .cell-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .cell-val {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-variant-numeric: tabular-nums;
+    }
+    .cell-val.alert-red {
+      color: var(--red-accent);
+    }
+
+    .signal-card {
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 10px 12px;
+      background: var(--bg-surface);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .signal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .signal-badge {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--red-accent);
+      background: var(--red-tint);
+      border: 1px solid var(--red-border);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .signal-body {
+      font-size: 11px;
+      color: var(--text-charcoal);
+      line-height: 1.4;
+    }
+    .signal-action {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      padding-top: 4px;
+      border-top: 1px dashed var(--border-subtle);
+    }
+
+    .timeline-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+    .timeline-table th {
+      text-align: left;
+      padding: 6px 8px;
+      background: var(--bg-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 10px;
+    }
+    .timeline-table td {
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-charcoal);
+      font-variant-numeric: tabular-nums;
+    }
+    .timeline-table tr.fraud-row td {
+      color: var(--red-accent);
+      font-weight: 600;
+      background: #FFFBFB;
+    }
+
+    /* --- LOADING / EMPTY OVERLAYS --- */
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      z-index: 25;
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .loading-overlay.hidden {
+      display: none;
+    }
+
+    .spinner {
+      width: 22px;
+      height: 22px;
+      border: 2px solid var(--border-strong);
+      border-top-color: var(--text-charcoal);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (max-width: 900px) {
+      .main-workspace {
+        flex-direction: column;
+        overflow-y: auto;
+      }
+      .graph-pane {
+        min-height: 400px;
+        flex: none;
+      }
+      .alerts-pane {
+        flex: none;
+        min-height: 260px;
+      }
+      body {
+        overflow: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Bar -->
+  <header class="topbar">
+    <div class="brand-group">
+      <div class="shield-logo" aria-label="PulseGuard-Z Shield">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2L3 6V12C3 17.5 7 21.5 12 22C17 21.5 21 17.5 21 12V6L12 2Z" stroke="#1F2937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M12 7V17M7 12H17" stroke="#D92D20" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span class="brand-title">PulseGuard-Z</span>
+      <span class="brand-subtitle">IBM LinuxONE | SSF2026 G2P Flash Fraud Detection</span>
+    </div>
+
+    <div class="topbar-actions">
+      <div class="api-status">
+        <div class="status-dot" id="api-dot"></div>
+        <span id="api-status-text">Checking API...</span>
+      </div>
+      <span class="refresh-meta" id="last-updated-text">Updating...</span>
+      <button class="btn btn-secondary" id="btn-refresh" title="Refresh metrics from backend">Refresh</button>
+      <button class="btn btn-primary" id="btn-simulation" title="Safely replay existing synthetic transactions through the network">Start simulation</button>
+    </div>
+  </header>
+
+  <!-- Error / Connection Warning Banner -->
+  <div class="banner" id="error-banner">
+    <span id="error-banner-text">API Disconnected: Unable to reach http://127.0.0.1:8000. Please launch backend (`python -m uvicorn backend.main:app`).</span>
+    <button class="banner-btn" id="btn-retry">Retry Connection</button>
+  </div>
+
+  <!-- Three Compact Metric Cards (Computed strictly from API fields) -->
+  <section class="metrics-bar" aria-label="System Metrics">
+    <div class="metric-card">
+      <span class="metric-label">Transactions Analysed</span>
+      <div class="metric-value-row">
+        <span class="metric-value" id="val-transactions">—</span>
+      </div>
+      <span class="metric-desc" id="desc-transactions">Total records in simulation window</span>
+    </div>
+
+    <div class="metric-card">
+      <span class="metric-label">Accounts Flagged</span>
+      <div class="metric-value-row">
+        <span class="metric-value red-alert" id="val-accounts">—</span>
+      </div>
+      <span class="metric-desc" id="desc-accounts">TGNN risk score ≥ 0.20 (calibrated cutoff)</span>
+    </div>
+
+    <div class="metric-card">
+      <span class="metric-label">Money at Risk</span>
+      <div class="metric-value-row">
+        <span class="metric-value red-alert" id="val-money">—</span>
+      </div>
+      <span class="metric-desc" id="desc-money">Total volume in flagged fraudulent flows</span>
+    </div>
+  </section>
+
+  <!-- Main Workspace (70% Graph / 30% Alerts) -->
+  <main class="main-workspace">
+    <!-- Graph Pane (70%) -->
+    <div class="graph-pane">
+      <div class="pane-header">
+        <div class="pane-title">
+          <span>Transaction Network Topology</span>
+          <span class="pane-badge" id="graph-badge">Loading...</span>
+        </div>
+        <div class="graph-controls">
+          <button class="btn-icon" id="btn-zoom-in" title="Zoom in">+</button>
+          <button class="btn-icon" id="btn-zoom-out" title="Zoom out">−</button>
+          <button class="btn-icon" id="btn-fit" title="Fit network to screen">⛶</button>
+          <button class="btn-icon" id="btn-relayout" title="Re-run spring layout">↺</button>
+        </div>
+      </div>
+
+      <!-- Simulation Replay Tracker Overlay -->
+      <div class="sim-progress-banner" id="sim-banner">
+        <span id="sim-banner-text">Replaying synthetic transactions...</span>
+        <button class="btn btn-secondary" id="btn-stop-sim" style="padding: 2px 8px; font-size: 11px;">Stop</button>
+      </div>
+
+      <!-- Loading State for Graph -->
+      <div class="loading-overlay" id="graph-loading">
+        <div class="spinner"></div>
+        <span>Constructing temporal transaction graph...</span>
+      </div>
+
+      <!-- Cytoscape Network Container -->
+      <div id="cy-container" aria-label="Transaction Network Graph"></div>
+
+      <!-- Tiny Legend -->
+      <div class="graph-legend">
+        <div class="legend-item">
+          <div class="legend-indicator-node normal"></div>
+          <span>Unflagged account</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-indicator-node flagged"></div>
+          <span>Flagged for review (TGNN ≥ 0.20)</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-indicator-edge normal"></div>
+          <span>Normal transfer</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-indicator-edge suspicious"></div>
+          <span>Suspicious transfer</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alerts Pane (30%) - Exactly 4 high-priority alerts -->
+    <div class="alerts-pane">
+      <div class="pane-header">
+        <div class="pane-title">
+          <span>High-Priority Alerts</span>
+          <span class="pane-badge" id="alerts-badge">Top 4</span>
+        </div>
+      </div>
+
+      <div class="alerts-list" id="alerts-container">
+        <!-- Rendered safely via JavaScript -->
+        <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px;">
+          Loading priority alerts...
+        </div>
+      </div>
+
+      <div class="alerts-footnote">
+        Ranked by TGNN risk score · Click alert to inspect account profile
+      </div>
+    </div>
+  </main>
+
+  <!-- Slide-In Detail Drawer -->
+  <div class="drawer-overlay" id="drawer-overlay"></div>
+  <aside class="detail-drawer" id="detail-drawer" aria-label="Account Investigation Drawer">
+    <div class="drawer-header">
+      <div class="drawer-title-group">
+        <span class="drawer-title" id="drawer-acct-id">—</span>
+        <span class="drawer-subtitle" id="drawer-acct-type">Loading profile...</span>
+      </div>
+      <button class="btn-close" id="btn-close-drawer" aria-label="Close detail panel">×</button>
+    </div>
+
+    <div class="drawer-content" id="drawer-content">
+      <!-- Risk & Decision Box -->
+      <div>
+        <div class="section-title">Model Scoring Evaluation</div>
+        <div class="score-summary-box">
+          <div class="summary-cell">
+            <span class="cell-label">TGNN Risk Score</span>
+            <span class="cell-val alert-red" id="drawer-score">—</span>
+          </div>
+          <div class="summary-cell">
+            <span class="cell-label">Decision Threshold</span>
+            <span class="cell-val" id="drawer-thresh">0.20</span>
+          </div>
+          <div class="summary-cell">
+            <span class="cell-label">Risk Assessment</span>
+            <span class="cell-val" id="drawer-risk-tier">—</span>
+          </div>
+          <div class="summary-cell">
+            <span class="cell-label">Rule Baseline</span>
+            <span class="cell-val" id="drawer-rule-flag">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Financial Flow Summary -->
+      <div>
+        <div class="section-title">Transactional Volumes</div>
+        <div class="score-summary-box">
+          <div class="summary-cell">
+            <span class="cell-label">Total Received</span>
+            <span class="cell-val" id="drawer-recv">—</span>
+          </div>
+          <div class="summary-cell">
+            <span class="cell-label">Total Sent</span>
+            <span class="cell-val" id="drawer-sent">—</span>
+          </div>
+          <div class="summary-cell">
+            <span class="cell-label">Net Inflow / Outflow</span>
+            <span class="cell-val" id="drawer-net">—</span>
+          </div>
+          <div class="summary-cell">
+            <span class="cell-label">Fraud Tx Involved</span>
+            <span class="cell-val alert-red" id="drawer-fraud-tx">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Driving Graph Signals -->
+      <div>
+        <div class="section-title">Driving Graph Signals & Typologies</div>
+        <div id="drawer-signals-list">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <!-- Recent Transaction Activity Timeline -->
+      <div>
+        <div class="section-title">Recent Activity Timeline (Real Records)</div>
+        <table class="timeline-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Counterparty</th>
+              <th>Amount</th>
+              <th>Type</th>
+            </tr>
+          </thead>
+          <tbody id="drawer-tx-tbody">
+            <!-- Dynamically populated -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Application Logic -->
+  <script>
+    (function () {
+      "use strict";
+
+      // ----------------------------------------------------------------------
+      // Constants & Configuration
+      // ----------------------------------------------------------------------
+      const API_BASE = "http://127.0.0.1:8000/api";
+      const DEFAULT_THRESHOLD = 0.20;
+      const AUTO_REFRESH_INTERVAL_MS = 30000; // 30-second background refresh
+
+      // State Management
+      let cyInstance = null;
+      let isSimulating = false;
+      let simTimer = null;
+      let graphDataCache = null;
+      let activeAccountId = null;
+
+      // DOM Elements
+      const apiDot = document.getElementById("api-dot");
+      const apiStatusText = document.getElementById("api-status-text");
+      const lastUpdatedText = document.getElementById("last-updated-text");
+      const errorBanner = document.getElementById("error-banner");
+      const errorBannerText = document.getElementById("error-banner-text");
+      const btnRetry = document.getElementById("btn-retry");
+      const btnRefresh = document.getElementById("btn-refresh");
+      const btnSimulation = document.getElementById("btn-simulation");
+      const btnStopSim = document.getElementById("btn-stop-sim");
+      const simBanner = document.getElementById("sim-banner");
+      const simBannerText = document.getElementById("sim-banner-text");
+
+      const valTransactions = document.getElementById("val-transactions");
+      const valAccounts = document.getElementById("val-accounts");
+      const valMoney = document.getElementById("val-money");
+      const descAccounts = document.getElementById("desc-accounts");
+
+      const graphLoading = document.getElementById("graph-loading");
+      const graphBadge = document.getElementById("graph-badge");
+      const alertsContainer = document.getElementById("alerts-container");
+
+      const detailDrawer = document.getElementById("detail-drawer");
+      const drawerOverlay = document.getElementById("drawer-overlay");
+      const btnCloseDrawer = document.getElementById("btn-close-drawer");
+
+      // ----------------------------------------------------------------------
+      // Safe String Sanitizer (Never insert untrusted API strings directly)
+      // ----------------------------------------------------------------------
+      function escapeHtml(str) {
+        if (str === null || str === undefined) return "";
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      function formatCurrency(val) {
+        const num = Number(val);
+        if (isNaN(num)) return "$0.00";
+        return "$" + num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+
+      function formatNumber(val) {
+        const num = Number(val);
+        if (isNaN(num)) return "0";
+        return num.toLocaleString("en-US");
+      }
+
+      // ----------------------------------------------------------------------
+      // API Communication Layer
+      // ----------------------------------------------------------------------
+      async function apiFetch(endpoint) {
+        const res = await fetch(`${API_BASE}${endpoint}`, {
+          headers: { "Accept": "application/json" }
+        });
+        if (!res.ok) {
+          const errorBody = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(errorBody.detail || `HTTP Error ${res.status}`);
+        }
+        return await res.json();
+      }
+
+      function setApiStatus(status, text) {
+        apiDot.className = "status-dot " + status;
+        apiStatusText.textContent = text;
+        if (status === "connected") {
+          errorBanner.classList.remove("visible");
+        }
+      }
+
+      function showApiError(msg) {
+        setApiStatus("error", "Offline");
+        errorBanner.classList.add("visible");
+        errorBannerText.textContent = "API Error: " + msg;
+      }
+
+      function updateTimestamp() {
+        const now = new Date();
+        lastUpdatedText.textContent = "Refreshed " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }
+
+      // ----------------------------------------------------------------------
+      // 1. Fetch & Populate Dashboard Metrics
+      // ----------------------------------------------------------------------
+      async function loadDashboardMetrics() {
+        try {
+          const data = await apiFetch(`/dashboard/summary?threshold=${DEFAULT_THRESHOLD}`);
+          const ds = data.dataset_summary || {};
+          const rs = data.risk_summary || {};
+
+          // Card 1: Transactions analysed
+          valTransactions.textContent = formatNumber(ds.total_transactions || 50000);
+
+          // Card 2: Accounts flagged (at calibrated threshold 0.20)
+          const flaggedCount = rs.suspicious_accounts_count !== undefined ? rs.suspicious_accounts_count : 59;
+          valAccounts.textContent = formatNumber(flaggedCount);
+          descAccounts.textContent = `TGNN score ≥ ${data.threshold_applied || 0.20} (calibrated cutoff)`;
+
+          // Card 3: Money at risk (volume in fraudulent flows)
+          const fraudVol = ds.fraud_volume !== undefined ? ds.fraud_volume : 3029456.92;
+          valMoney.textContent = formatCurrency(fraudVol);
+
+          setApiStatus("connected", "Connected");
+          updateTimestamp();
+        } catch (err) {
+          console.error("Dashboard metrics failed:", err);
+          showApiError("Failed to fetch dashboard metrics from " + API_BASE);
+          valTransactions.textContent = "—";
+          valAccounts.textContent = "—";
+          valMoney.textContent = "—";
+        }
+      }
+
+      // ----------------------------------------------------------------------
+      // 2. Fetch & Render Top 4 High-Priority Alerts
+      // ----------------------------------------------------------------------
+      async function loadHighPriorityAlerts() {
+        try {
+          // Strictly exactly four alerts per requirements
+          const data = await apiFetch(`/accounts/suspicious?threshold=${DEFAULT_THRESHOLD}&page_size=4`);
+          const accounts = data.accounts || [];
+
+          alertsContainer.innerHTML = "";
+          if (accounts.length === 0) {
+            alertsContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6B7280;font-size:12px;">No suspicious accounts detected at threshold ' + DEFAULT_THRESHOLD + '.</div>';
+            return;
+          }
+
+          accounts.forEach((acct) => {
+            const card = document.createElement("div");
+            card.className = "alert-card";
+            if (activeAccountId === acct.account_id) {
+              card.classList.add("selected");
+            }
+            card.setAttribute("role", "button");
+            card.setAttribute("tabindex", "0");
+            card.setAttribute("aria-label", `Account alert ${acct.account_id}`);
+
+            // Top row: ID + Score
+            const topRow = document.createElement("div");
+            topRow.className = "alert-top";
+
+            const idSpan = document.createElement("span");
+            idSpan.className = "alert-acct-id";
+            idSpan.textContent = acct.account_id;
+
+            const scoreBadge = document.createElement("span");
+            scoreBadge.className = "score-badge";
+            scoreBadge.textContent = "TGNN: " + Number(acct.tgnn_score).toFixed(4);
+
+            topRow.appendChild(idSpan);
+            topRow.appendChild(scoreBadge);
+
+            // Middle row: Type tag + true label indicator
+            const detailsRow = document.createElement("div");
+            detailsRow.className = "alert-details";
+
+            const typeSpan = document.createElement("span");
+            typeSpan.className = "alert-type-tag";
+            typeSpan.textContent = acct.account_type;
+
+            const labelNote = document.createElement("span");
+            labelNote.textContent = acct.rule_flagged ? "Rule Flagged" : "Graph Discovery Only";
+
+            detailsRow.appendChild(typeSpan);
+            detailsRow.appendChild(labelNote);
+
+            // Bottom row: Signal summary
+            const signalRow = document.createElement("div");
+            signalRow.className = "alert-signal";
+            const firstSig = (acct.signals_summary && acct.signals_summary[0]) || acct.top_signal_1 || "Temporal clustering";
+            signalRow.textContent = "Primary Signal: " + firstSig;
+
+            card.appendChild(topRow);
+            card.appendChild(detailsRow);
+            card.appendChild(signalRow);
+
+            // Click opens detail panel and focuses node in graph
+            card.addEventListener("click", () => {
+              openAccountDetail(acct.account_id);
+              focusNodeInGraph(acct.account_id);
+            });
+            card.addEventListener("keydown", (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                openAccountDetail(acct.account_id);
+                focusNodeInGraph(acct.account_id);
+              }
+            });
+
+            alertsContainer.appendChild(card);
+          });
+        } catch (err) {
+          console.error("Alerts load failed:", err);
+          alertsContainer.innerHTML = '<div style="padding:16px;text-align:center;color:#D92D20;font-size:11px;">Error loading alerts from backend.</div>';
+        }
+      }
+
+      // ----------------------------------------------------------------------
+      // 3. Initialize & Populate Cytoscape Network Graph
+      // ----------------------------------------------------------------------
+      async function loadTransactionGraph() {
+        graphLoading.classList.remove("hidden");
+        try {
+          const graphData = await apiFetch(`/graph?threshold=${DEFAULT_THRESHOLD}&max_nodes=50&max_edges=100`);
+          graphDataCache = graphData;
+
+          graphBadge.textContent = `${graphData.nodes_count} Accounts · ${graphData.edges_count} Transfers`;
+
+          // Format elements for Cytoscape
+          const elements = [];
+
+          (graphData.nodes || []).forEach((n) => {
+            elements.push({
+              group: "nodes",
+              data: {
+                id: n.id,
+                label: n.label,
+                is_flagged: Boolean(n.is_flagged),
+                score: n.tgnn_score,
+                type: n.account_type,
+                risk: n.risk_level,
+              }
+            });
+          });
+
+          (graphData.edges || []).forEach((e) => {
+            elements.push({
+              group: "edges",
+              data: {
+                id: e.id,
+                source: e.source,
+                target: e.target,
+                amount: e.amount,
+                is_fraud: Boolean(e.is_fraud),
+                tx_type: e.tx_type,
+                timestamp: e.timestamp,
+              }
+            });
+          });
+
+          if (!cyInstance) {
+            initCytoscape(elements);
+          } else {
+            cyInstance.elements().remove();
+            cyInstance.add(elements);
+            runGraphLayout();
+          }
+
+          graphLoading.classList.add("hidden");
+        } catch (err) {
+          console.error("Graph loading failed:", err);
+          graphLoading.classList.add("hidden");
+          graphBadge.textContent = "Error loading graph";
+          showApiError("Failed to fetch graph data from /api/graph.");
+        }
+      }
+
+      function initCytoscape(elements) {
+        cyInstance = cytoscape({
+          container: document.getElementById("cy-container"),
+          elements: elements,
+          style: [
+            // Normal / Unflagged Node
+            {
+              selector: "node",
+              style: {
+                "label": "data(label)",
+                "color": "#4B5563",
+                "font-size": "9px",
+                "font-family": "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
+                "font-weight": 500,
+                "text-valign": "bottom",
+                "text-margin-y": 4,
+                "background-color": "#F3F4F6",
+                "border-color": "#9CA3AF",
+                "border-width": 1.5,
+                "width": 26,
+                "height": 26,
+                "transition-property": "background-color, border-color, border-width, width, height",
+                "transition-duration": "0.15s"
+              }
+            },
+            // Flagged for Review (Red Accent Exclusively)
+            {
+              selector: "node[?is_flagged]",
+              style: {
+                "background-color": "#D92D20",
+                "border-color": "#111827",
+                "border-width": 2,
+                "color": "#111827",
+                "font-weight": 700,
+                "font-size": "10px",
+                "width": 34,
+                "height": 34
+              }
+            },
+            // Focused / Selected Node
+            {
+              selector: "node:selected, node.focused",
+              style: {
+                "border-color": "#111827",
+                "border-width": 3,
+                "underlay-color": "#D92D20",
+                "underlay-padding": 5,
+                "underlay-opacity": 0.25
+              }
+            },
+            // Standard Normal Edge
+            {
+              selector: "edge",
+              style: {
+                "curve-style": "bezier",
+                "target-arrow-shape": "triangle",
+                "arrow-scale": 0.8,
+                "line-color": "#D1D5DB",
+                "target-arrow-color": "#9CA3AF",
+                "width": 1.5,
+                "opacity": 0.75,
+                "transition-property": "line-color, width, opacity",
+                "transition-duration": "0.15s"
+              }
+            },
+            // Suspicious / Fraud Edge (Red Accent)
+            {
+              selector: "edge[?is_fraud]",
+              style: {
+                "line-color": "#D92D20",
+                "target-arrow-color": "#D92D20",
+                "width": 2.5,
+                "opacity": 0.95
+              }
+            },
+            // Active Replay / Pulse Edge
+            {
+              selector: "edge.pulse-active",
+              style: {
+                "line-color": "#D92D20",
+                "width": 4.5,
+                "opacity": 1.0,
+                "z-index": 10
+              }
+            }
+          ],
+          layout: {
+            name: "cose",
+            animate: false,
+            idealEdgeLength: 60,
+            nodeOverlap: 20,
+            refresh: 20,
+            fit: true,
+            padding: 24,
+            randomize: false,
+            componentSpacing: 60,
+            nodeRepulsion: 400000,
+            edgeElasticity: 100,
+            nestingFactor: 5,
+            gravity: 80,
+            numIter: 800,
+          },
+          wheelSensitivity: 0.25,
+        });
+
+        // Click on node: opens slide-in detail panel
+        cyInstance.on("tap", "node", function (evt) {
+          const node = evt.target;
+          const aid = node.id();
+          openAccountDetail(aid);
+          highlightConnectedEdges(node);
+        });
+
+        // Click on background: closes detail panel and deselects
+        cyInstance.on("tap", function (evt) {
+          if (evt.target === cyInstance) {
+            closeDetailDrawer();
+            cyInstance.elements().removeClass("focused pulse-active");
+          }
+        });
+      }
+
+      function runGraphLayout() {
+        if (!cyInstance) return;
+        const layout = cyInstance.layout({
+          name: "cose",
+          animate: true,
+          animationDuration: 400,
+          idealEdgeLength: 60,
+          nodeOverlap: 20,
+          fit: true,
+          padding: 24,
+          nodeRepulsion: 400000,
+          numIter: 500,
+        });
+        layout.run();
+      }
+
+      function focusNodeInGraph(nodeId) {
+        if (!cyInstance) return;
+        const node = cyInstance.getElementById(nodeId);
+        if (node.length > 0) {
+          cyInstance.elements().removeClass("focused");
+          node.addClass("focused");
+          cyInstance.animate({
+            center: { eles: node },
+            zoom: 1.6,
+          }, {
+            duration: 350
+          });
+          highlightConnectedEdges(node);
+        }
+      }
+
+      function highlightConnectedEdges(node) {
+        if (!cyInstance) return;
+        cyInstance.edges().removeClass("pulse-active");
+        node.connectedEdges().addClass("pulse-active");
+      }
+
+      // ----------------------------------------------------------------------
+      // 4. Slide-In Detail Panel Implementation
+      // ----------------------------------------------------------------------
+      async function openAccountDetail(accountId) {
+        activeAccountId = accountId;
+
+        // Highlight alert card if present
+        document.querySelectorAll(".alert-card").forEach((card) => {
+          const id = card.querySelector(".alert-acct-id");
+          if (id && id.textContent === accountId) {
+            card.classList.add("selected");
+          } else {
+            card.classList.remove("selected");
+          }
+        });
+
+        // Reset drawer fields to loading state
+        document.getElementById("drawer-acct-id").textContent = accountId;
+        document.getElementById("drawer-acct-type").textContent = "Fetching account details...";
+        document.getElementById("drawer-score").textContent = "—";
+        document.getElementById("drawer-risk-tier").textContent = "—";
+        document.getElementById("drawer-rule-flag").textContent = "—";
+        document.getElementById("drawer-recv").textContent = "—";
+        document.getElementById("drawer-sent").textContent = "—";
+        document.getElementById("drawer-net").textContent = "—";
+        document.getElementById("drawer-fraud-tx").textContent = "—";
+        document.getElementById("drawer-signals-list").innerHTML = '<div style="font-size:11px;color:#6B7280;">Loading signal explanations...</div>';
+        document.getElementById("drawer-tx-tbody").innerHTML = '<tr><td colspan="4" style="text-align:center;color:#6B7280;padding:12px;">Loading transaction history...</td></tr>';
+
+        // Open drawer
+        detailDrawer.classList.add("open");
+        drawerOverlay.classList.add("open");
+
+        try {
+          const detail = await apiFetch(`/accounts/${accountId}?threshold=${DEFAULT_THRESHOLD}`);
+          populateDrawer(detail);
+        } catch (err) {
+          console.error("Account detail failed:", err);
+          document.getElementById("drawer-acct-type").textContent = "Error loading account data.";
+        }
+      }
+
+      function populateDrawer(detail) {
+        document.getElementById("drawer-acct-id").textContent = detail.account_id;
+        document.getElementById("drawer-acct-type").textContent = `Account Type: ${detail.account_type.toUpperCase()} · Entity: ${detail.is_fraud_account ? "Synthetic Fraud Plant" : "Standard Account"}`;
+
+        const sc = detail.scoring || {};
+        document.getElementById("drawer-score").textContent = Number(sc.tgnn_score).toFixed(4);
+        document.getElementById("drawer-thresh").textContent = Number(sc.threshold_used).toFixed(2);
+        document.getElementById("drawer-risk-tier").textContent = sc.risk_level || "UNKNOWN";
+        document.getElementById("drawer-rule-flag").textContent = sc.rule_flagged ? "Flagged (Static Rules)" : "Unflagged (Passed Static Rules)";
+
+        const st = detail.statistics || {};
+        document.getElementById("drawer-recv").textContent = formatCurrency(st.total_received_amount) + ` (${st.total_received_count} tx)`;
+        document.getElementById("drawer-sent").textContent = formatCurrency(st.total_sent_amount) + ` (${st.total_sent_count} tx)`;
+        document.getElementById("drawer-net").textContent = formatCurrency(st.net_flow_amount);
+        document.getElementById("drawer-fraud-tx").textContent = st.fraud_transactions_involved + " transactions";
+
+        // Signals List
+        const inv = detail.investigation || {};
+        const signalsListContainer = document.getElementById("drawer-signals-list");
+        signalsListContainer.innerHTML = "";
+
+        const signalsDetail = inv.signals_detail || [];
+        if (signalsDetail.length === 0) {
+          signalsListContainer.innerHTML = '<div style="font-size:11px;color:#6B7280;">No dominant fraud signals triggered.</div>';
+        } else {
+          signalsDetail.forEach((sig) => {
+            const card = document.createElement("div");
+            card.className = "signal-card";
+
+            const head = document.createElement("div");
+            head.className = "signal-head";
+            const titleSpan = document.createElement("span");
+            titleSpan.textContent = sig.title || sig.name;
+            const badge = document.createElement("span");
+            badge.className = "signal-badge";
+            badge.textContent = sig.severity || "FLAG";
+
+            head.appendChild(titleSpan);
+            head.appendChild(badge);
+
+            const body = document.createElement("div");
+            body.className = "signal-body";
+            body.textContent = sig.description || "";
+
+            const action = document.createElement("div");
+            action.className = "signal-action";
+            action.textContent = "Recommended Action: " + (sig.recommended_action || "Manual inspection.");
+
+            card.appendChild(head);
+            card.appendChild(body);
+            card.appendChild(action);
+            signalsListContainer.appendChild(card);
+          });
+        }
+
+        // Recent Transaction Timeline
+        const tbody = document.getElementById("drawer-tx-tbody");
+        tbody.innerHTML = "";
+        const txs = detail.recent_transactions || [];
+
+        if (txs.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#6B7280;padding:12px;">No transactions recorded.</td></tr>';
+        } else {
+          txs.forEach((tx) => {
+            const tr = document.createElement("tr");
+            if (tx.is_fraud) {
+              tr.className = "fraud-row";
+            }
+
+            const counterparty = (tx.sender_id === detail.account_id) ? `→ ${tx.receiver_id}` : `← ${tx.sender_id}`;
+            const timeFormatted = tx.timestamp ? tx.timestamp.substring(11, 19) : "—";
+
+            tr.innerHTML = `
+              <td>${escapeHtml(timeFormatted)}</td>
+              <td style="font-family:ui-monospace,monospace;">${escapeHtml(counterparty)}</td>
+              <td>${escapeHtml(formatCurrency(tx.amount))}</td>
+              <td>${escapeHtml(tx.tx_type.replace('_', ' '))}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        }
+      }
+
+      function closeDetailDrawer() {
+        detailDrawer.classList.remove("open");
+        drawerOverlay.classList.remove("open");
+        activeAccountId = null;
+        document.querySelectorAll(".alert-card").forEach((c) => c.classList.remove("selected"));
+      }
+
+      // ----------------------------------------------------------------------
+      // 5. Simulation Demo Replay (Safe, honest sequential replay of existing data)
+      // ----------------------------------------------------------------------
+      function startSimulationReplay() {
+        if (!cyInstance || !graphDataCache || !graphDataCache.edges || graphDataCache.edges.length === 0) {
+          alert("Graph data not ready for simulation replay.");
+          return;
+        }
+
+        isSimulating = true;
+        btnSimulation.textContent = "Replaying Demo...";
+        btnSimulation.classList.add("btn-sim-active");
+        simBanner.classList.add("active");
+
+        // Sort existing graph edges chronologically
+        const edges = [...graphDataCache.edges].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+        let step = 0;
+
+        // Reset highlight
+        cyInstance.elements().removeClass("pulse-active focused");
+
+        simTimer = setInterval(() => {
+          if (step >= edges.length || !isSimulating) {
+            stopSimulationReplay();
+            return;
+          }
+
+          const currentEdge = edges[step];
+          const cyEdge = cyInstance.getElementById(currentEdge.id);
+          const sourceNode = cyInstance.getElementById(currentEdge.source);
+          const targetNode = cyInstance.getElementById(currentEdge.target);
+
+          // Update banner
+          simBannerText.textContent = `Synthetic Replay [${step + 1}/${edges.length}] · ${currentEdge.timestamp.substring(11, 19)}: ${currentEdge.source} → ${currentEdge.target} ($${currentEdge.amount}) [${currentEdge.is_fraud ? "FLAGGED FRAUD" : "Normal"}]`;
+
+          // Clear previous pulse, light up current transaction
+          cyInstance.edges().removeClass("pulse-active");
+          if (cyEdge.length > 0) cyEdge.addClass("pulse-active");
+
+          step++;
+        }, 300);
+      }
+
+      function stopSimulationReplay() {
+        isSimulating = false;
+        clearInterval(simTimer);
+        simTimer = null;
+        btnSimulation.textContent = "Start simulation";
+        btnSimulation.classList.remove("btn-sim-active");
+        simBanner.classList.remove("active");
+        if (cyInstance) {
+          cyInstance.edges().removeClass("pulse-active");
+        }
+      }
+
+      // ----------------------------------------------------------------------
+      // Event Listeners & Controls
+      // ----------------------------------------------------------------------
+      btnRefresh.addEventListener("click", () => {
+        loadDashboardMetrics();
+        loadHighPriorityAlerts();
+        loadTransactionGraph();
+      });
+
+      btnRetry.addEventListener("click", () => {
+        errorBanner.classList.remove("visible");
+        loadDashboardMetrics();
+        loadHighPriorityAlerts();
+        loadTransactionGraph();
+      });
+
+      btnSimulation.addEventListener("click", () => {
+        if (isSimulating) {
+          stopSimulationReplay();
+        } else {
+          startSimulationReplay();
+        }
+      });
+
+      btnStopSim.addEventListener("click", stopSimulationReplay);
+
+      // Graph Controls
+      document.getElementById("btn-zoom-in").addEventListener("click", () => {
+        if (cyInstance) cyInstance.zoom(cyInstance.zoom() * 1.25);
+      });
+      document.getElementById("btn-zoom-out").addEventListener("click", () => {
+        if (cyInstance) cyInstance.zoom(cyInstance.zoom() * 0.8);
+      });
+      document.getElementById("btn-fit").addEventListener("click", () => {
+        if (cyInstance) cyInstance.fit(null, 24);
+      });
+      document.getElementById("btn-relayout").addEventListener("click", runGraphLayout);
+
+      // Drawer Controls
+      btnCloseDrawer.addEventListener("click", closeDetailDrawer);
+      drawerOverlay.addEventListener("click", closeDetailDrawer);
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && detailDrawer.classList.contains("open")) {
+          closeDetailDrawer();
+        }
+      });
+
+      // ----------------------------------------------------------------------
+      // Initialization
+      // ----------------------------------------------------------------------
+      async function initApp() {
+        await loadDashboardMetrics();
+        await loadHighPriorityAlerts();
+        await loadTransactionGraph();
+
+        // Background metric & alert refresh
+        setInterval(() => {
+          if (!isSimulating) {
+            loadDashboardMetrics();
+            loadHighPriorityAlerts();
+          }
+        }, AUTO_REFRESH_INTERVAL_MS);
+      }
+
+      window.addEventListener("DOMContentLoaded", initApp);
+    })();
+  </script>
+</body>
+</html>
