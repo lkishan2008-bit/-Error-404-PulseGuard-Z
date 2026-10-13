@@ -4,40 +4,48 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PulseGuard-Z — Flash Fraud Detection on IBM LinuxONE</title>
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- Cytoscape.js CDN for interactive transaction graph -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
   <style>
     /* ==========================================================================
-       PulseGuard-Z Design System
-       Palette: White (#FFF), Light Grey (#F9FAFB, #F3F4F6, #E5E7EB),
-                Charcoal (#1F2937, #111827), and Red Accent (#D92D20) exclusively.
+       PulseGuard-Z Dark Theme Design System
+       Palette: Exact specification
+         --bg: #0D1117;
+         --surface: #161B22;
+         --border: #262C36;
+         --text: #E6EDF3;
+         --muted: #8B949E;
+         --node-normal: #4B5563;
+         --edge-normal: #30363D;
+         --risk: #F04438;
+       No gradients, glows, neon, or heavy shadows.
        ========================================================================== */
+    :root {
+      --bg: #0D1117;
+      --surface: #161B22;
+      --border: #262C36;
+      --text: #E6EDF3;
+      --muted: #8B949E;
+      --node-normal: #4B5563;
+      --edge-normal: #30363D;
+      --risk: #F04438;
+      --font-stack: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+    }
+
     *, *::before, *::after {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
 
-    :root {
-      --bg-main: #F9FAFB;
-      --bg-surface: #FFFFFF;
-      --bg-subtle: #F3F4F6;
-      --border-subtle: #E5E7EB;
-      --border-strong: #D1D5DB;
-      --text-primary: #111827;
-      --text-charcoal: #1F2937;
-      --text-muted: #6B7280;
-      --text-light: #9CA3AF;
-      --red-accent: #D92D20;
-      --red-tint: #FEF2F2;
-      --red-border: #FCA5A5;
-      --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
-    }
-
     body {
       font-family: var(--font-stack);
-      background-color: var(--bg-main);
-      color: var(--text-charcoal);
+      background-color: var(--bg);
+      color: var(--text);
       height: 100vh;
       overflow: hidden;
       display: flex;
@@ -48,8 +56,8 @@
     /* --- TOP BAR --- */
     .topbar {
       height: 52px;
-      background: var(--bg-surface);
-      border-bottom: 1px solid var(--border-subtle);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -75,7 +83,7 @@
     .brand-title {
       font-size: 15px;
       font-weight: 700;
-      color: var(--text-primary);
+      color: var(--text);
       letter-spacing: -0.2px;
       display: flex;
       align-items: center;
@@ -85,9 +93,9 @@
     .brand-subtitle {
       font-size: 11px;
       font-weight: 500;
-      color: var(--text-muted);
+      color: var(--muted);
       padding-left: 8px;
-      border-left: 1px solid var(--border-subtle);
+      border-left: 1px solid var(--border);
       letter-spacing: 0.1px;
     }
 
@@ -102,7 +110,7 @@
       align-items: center;
       gap: 6px;
       font-size: 12px;
-      color: var(--text-muted);
+      color: var(--muted);
       font-weight: 500;
     }
 
@@ -110,26 +118,26 @@
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      background-color: var(--text-light);
+      background-color: var(--muted);
     }
     .status-dot.connected {
-      background-color: var(--text-charcoal);
+      background-color: var(--text);
     }
     .status-dot.error {
-      background-color: var(--red-accent);
+      background-color: var(--risk);
     }
 
     .refresh-meta {
       font-size: 11px;
-      color: var(--text-light);
+      color: var(--muted);
     }
 
     .btn {
       font-family: inherit;
       font-size: 12px;
       font-weight: 600;
-      padding: 6px 12px;
-      border-radius: 6px;
+      padding: 6px 14px;
+      border-radius: 10px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
@@ -138,38 +146,40 @@
     }
 
     .btn-secondary {
-      background: var(--bg-surface);
-      color: var(--text-charcoal);
-      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
     }
     .btn-secondary:hover {
-      background: var(--bg-subtle);
+      background: var(--edge-normal);
+      border-color: var(--muted);
     }
 
     .btn-primary {
-      background: var(--text-charcoal);
-      color: #FFFFFF;
-      border: 1px solid var(--text-charcoal);
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
     }
     .btn-primary:hover {
-      background: #111827;
+      background: var(--edge-normal);
+      border-color: var(--muted);
     }
 
     .btn-sim-active {
-      background: var(--red-accent);
-      border-color: var(--red-accent);
+      background: var(--risk);
+      border-color: var(--risk);
       color: #FFFFFF;
     }
     .btn-sim-active:hover {
-      background: #B42318;
+      background: #D92D20;
     }
 
     /* --- NOTIFICATION / ERROR BANNER --- */
     .banner {
       display: none;
-      background: var(--red-tint);
-      border-bottom: 1px solid var(--red-border);
-      color: var(--red-accent);
+      background: #1C1315;
+      border-bottom: 1px solid #4D1A1C;
+      color: var(--risk);
       padding: 8px 20px;
       font-size: 12px;
       font-weight: 500;
@@ -182,11 +192,11 @@
       display: flex;
     }
     .banner-btn {
-      background: none;
-      border: 1px solid var(--red-accent);
-      color: var(--red-accent);
+      background: transparent;
+      border: 1px solid var(--risk);
+      color: var(--risk);
       padding: 3px 8px;
-      border-radius: 4px;
+      border-radius: 6px;
       font-size: 11px;
       cursor: pointer;
       font-weight: 600;
@@ -198,18 +208,18 @@
       grid-template-columns: repeat(3, 1fr);
       gap: 12px;
       padding: 12px 20px;
-      background: var(--bg-main);
+      background: var(--bg);
       flex-shrink: 0;
     }
 
     .metric-card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: 8px;
-      padding: 12px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 4px;
     }
 
     .metric-label {
@@ -217,7 +227,7 @@
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      color: var(--text-muted);
+      color: var(--muted);
     }
 
     .metric-value-row {
@@ -229,17 +239,17 @@
     .metric-value {
       font-size: 22px;
       font-weight: 700;
-      color: var(--text-primary);
+      color: var(--text);
       letter-spacing: -0.4px;
       font-variant-numeric: tabular-nums;
     }
     .metric-value.red-alert {
-      color: var(--red-accent);
+      color: var(--risk);
     }
 
     .metric-desc {
       font-size: 11px;
-      color: var(--text-light);
+      color: var(--muted);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -251,16 +261,16 @@
       display: flex;
       padding: 0 20px 16px 20px;
       gap: 16px;
-      min-height: 0; /* Important for flex child overflow */
+      min-height: 0;
       position: relative;
     }
 
     /* --- GRAPH CONTAINER (70%) --- */
     .graph-pane {
       flex: 7;
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
       display: flex;
       flex-direction: column;
       position: relative;
@@ -270,20 +280,20 @@
 
     .pane-header {
       height: 42px;
-      border-bottom: 1px solid var(--border-subtle);
-      padding: 0 14px;
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       flex-shrink: 0;
-      background: var(--bg-surface);
+      background: var(--surface);
     }
 
     .pane-title {
       font-size: 12px;
       font-weight: 700;
       letter-spacing: 0.1px;
-      color: var(--text-charcoal);
+      color: var(--text);
       display: flex;
       align-items: center;
       gap: 8px;
@@ -292,11 +302,11 @@
     .pane-badge {
       font-size: 11px;
       font-weight: 500;
-      background: var(--bg-subtle);
-      color: var(--text-muted);
-      padding: 2px 6px;
-      border-radius: 4px;
-      border: 1px solid var(--border-subtle);
+      background: var(--bg);
+      color: var(--muted);
+      padding: 2px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
     }
 
     .graph-controls {
@@ -306,28 +316,29 @@
     }
 
     .btn-icon {
-      width: 26px;
-      height: 26px;
-      background: var(--bg-surface);
-      border: 1px solid var(--border-strong);
-      border-radius: 4px;
+      width: 28px;
+      height: 28px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
       font-size: 12px;
       font-weight: 600;
-      color: var(--text-charcoal);
+      color: var(--text);
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
     }
     .btn-icon:hover {
-      background: var(--bg-subtle);
+      background: var(--edge-normal);
+      border-color: var(--muted);
     }
 
     #cy-container {
       flex: 1;
       width: 100%;
       height: 100%;
-      background: #FFFFFF;
+      background: var(--bg);
       position: relative;
     }
 
@@ -336,24 +347,23 @@
       position: absolute;
       bottom: 12px;
       left: 14px;
-      background: rgba(255, 255, 255, 0.95);
-      border: 1px solid var(--border-subtle);
-      border-radius: 6px;
-      padding: 6px 12px;
+      background: rgba(22, 27, 34, 0.95);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 14px;
       display: flex;
       align-items: center;
       gap: 14px;
       font-size: 11px;
-      color: var(--text-muted);
+      color: var(--muted);
       z-index: 5;
       pointer-events: none;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
     }
 
     .legend-item {
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
     }
 
     .legend-indicator-node {
@@ -362,12 +372,12 @@
       border-radius: 50%;
     }
     .legend-indicator-node.normal {
-      background: var(--bg-subtle);
-      border: 1.5px solid var(--border-strong);
+      background: var(--node-normal);
+      border: 1px solid var(--border);
     }
     .legend-indicator-node.flagged {
-      background: var(--red-accent);
-      border: 1px solid #111827;
+      background: var(--risk);
+      border: 1px solid var(--text);
     }
 
     .legend-indicator-edge {
@@ -375,10 +385,10 @@
       height: 2px;
     }
     .legend-indicator-edge.normal {
-      background: var(--border-strong);
+      background: var(--edge-normal);
     }
     .legend-indicator-edge.suspicious {
-      background: var(--red-accent);
+      background: var(--risk);
     }
 
     /* Simulation Tracker Overlay */
@@ -388,13 +398,13 @@
       top: 50px;
       left: 14px;
       right: 14px;
-      background: #FFFFFF;
-      border: 1px solid var(--border-strong);
-      border-radius: 6px;
-      padding: 8px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
       font-size: 11px;
+      color: var(--text);
       z-index: 10;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
       align-items: center;
       justify-content: space-between;
     }
@@ -405,9 +415,9 @@
     /* --- ALERTS PANE (30%) --- */
     .alerts-pane {
       flex: 3;
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
       display: flex;
       flex-direction: column;
       min-width: 280px;
@@ -417,17 +427,17 @@
     .alerts-list {
       flex: 1;
       overflow-y: auto;
-      padding: 10px;
+      padding: 12px;
       display: flex;
       flex-direction: column;
       gap: 8px;
     }
 
     .alert-card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: 6px;
-      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
       cursor: pointer;
       display: flex;
       flex-direction: column;
@@ -436,12 +446,12 @@
       position: relative;
     }
     .alert-card:hover {
-      border-color: var(--border-strong);
-      background: var(--bg-subtle);
+      border-color: var(--muted);
+      background: #1C2128;
     }
     .alert-card.selected {
-      border-color: var(--red-accent);
-      background: var(--red-tint);
+      border-color: var(--risk);
+      background: #201314;
     }
 
     .alert-top {
@@ -453,18 +463,18 @@
     .alert-acct-id {
       font-size: 12px;
       font-weight: 700;
-      color: var(--text-primary);
+      color: var(--text);
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     }
 
     .score-badge {
       font-size: 11px;
       font-weight: 700;
-      color: var(--red-accent);
-      background: var(--red-tint);
-      border: 1px solid var(--red-border);
-      padding: 2px 6px;
-      border-radius: 4px;
+      color: var(--risk);
+      background: #261717;
+      border: 1px solid #4D1A1C;
+      padding: 2px 7px;
+      border-radius: 6px;
       font-variant-numeric: tabular-nums;
     }
 
@@ -473,20 +483,21 @@
       align-items: center;
       gap: 8px;
       font-size: 11px;
-      color: var(--text-muted);
+      color: var(--muted);
     }
 
     .alert-type-tag {
-      background: var(--bg-subtle);
-      border: 1px solid var(--border-subtle);
-      padding: 1px 5px;
-      border-radius: 3px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 1px 6px;
+      border-radius: 4px;
       text-transform: capitalize;
     }
 
     .alert-signal {
       font-size: 11px;
-      color: var(--text-charcoal);
+      color: var(--text);
       font-weight: 500;
       line-height: 1.3;
       white-space: nowrap;
@@ -495,11 +506,11 @@
     }
 
     .alerts-footnote {
-      padding: 8px 12px;
-      border-top: 1px solid var(--border-subtle);
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
       font-size: 10px;
-      color: var(--text-light);
-      background: var(--bg-surface);
+      color: var(--muted);
+      background: var(--surface);
       text-align: center;
     }
 
@@ -510,7 +521,7 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(17, 24, 39, 0.25);
+      background: rgba(0, 0, 0, 0.6);
       z-index: 40;
       opacity: 0;
       pointer-events: none;
@@ -528,9 +539,9 @@
       bottom: 0;
       width: 440px;
       max-width: 90vw;
-      background: #FFFFFF;
-      border-left: 1px solid var(--border-subtle);
-      box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      color: var(--text);
       z-index: 50;
       display: flex;
       flex-direction: column;
@@ -543,12 +554,12 @@
 
     .drawer-header {
       padding: 16px 20px;
-      border-bottom: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       justify-content: space-between;
       flex-shrink: 0;
-      background: var(--bg-surface);
+      background: var(--surface);
     }
 
     .drawer-title-group {
@@ -560,13 +571,13 @@
     .drawer-title {
       font-size: 16px;
       font-weight: 700;
-      color: var(--text-primary);
+      color: var(--text);
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     }
 
     .drawer-subtitle {
       font-size: 11px;
-      color: var(--text-muted);
+      color: var(--muted);
       display: flex;
       align-items: center;
       gap: 6px;
@@ -575,10 +586,10 @@
     .btn-close {
       width: 28px;
       height: 28px;
-      border-radius: 4px;
-      border: 1px solid var(--border-subtle);
-      background: var(--bg-surface);
-      color: var(--text-charcoal);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
       font-size: 16px;
       font-weight: 500;
       display: flex;
@@ -587,7 +598,8 @@
       cursor: pointer;
     }
     .btn-close:hover {
-      background: var(--bg-subtle);
+      background: var(--edge-normal);
+      border-color: var(--muted);
     }
 
     .drawer-content {
@@ -604,7 +616,7 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      color: var(--text-muted);
+      color: var(--muted);
       margin-bottom: 8px;
       display: flex;
       align-items: center;
@@ -612,9 +624,9 @@
     }
 
     .score-summary-box {
-      background: var(--bg-subtle);
-      border: 1px solid var(--border-subtle);
-      border-radius: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
       padding: 12px;
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -628,24 +640,24 @@
     }
     .cell-label {
       font-size: 10px;
-      color: var(--text-muted);
+      color: var(--muted);
       font-weight: 500;
     }
     .cell-val {
       font-size: 14px;
       font-weight: 700;
-      color: var(--text-primary);
+      color: var(--text);
       font-variant-numeric: tabular-nums;
     }
     .cell-val.alert-red {
-      color: var(--red-accent);
+      color: var(--risk);
     }
 
     .signal-card {
-      border: 1px solid var(--border-subtle);
-      border-radius: 6px;
-      padding: 10px 12px;
-      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      background: var(--bg);
       display: flex;
       flex-direction: column;
       gap: 4px;
@@ -657,28 +669,28 @@
       justify-content: space-between;
       font-size: 12px;
       font-weight: 600;
-      color: var(--text-primary);
+      color: var(--text);
     }
     .signal-badge {
       font-size: 10px;
       font-weight: 700;
-      color: var(--red-accent);
-      background: var(--red-tint);
-      border: 1px solid var(--red-border);
-      padding: 1px 5px;
-      border-radius: 3px;
+      color: var(--risk);
+      background: #261717;
+      border: 1px solid #4D1A1C;
+      padding: 1px 6px;
+      border-radius: 4px;
     }
     .signal-body {
       font-size: 11px;
-      color: var(--text-charcoal);
+      color: var(--text);
       line-height: 1.4;
     }
     .signal-action {
       font-size: 10px;
-      color: var(--text-muted);
+      color: var(--muted);
       margin-top: 4px;
       padding-top: 4px;
-      border-top: 1px dashed var(--border-subtle);
+      border-top: 1px dashed var(--border);
     }
 
     .timeline-table {
@@ -688,23 +700,23 @@
     }
     .timeline-table th {
       text-align: left;
-      padding: 6px 8px;
-      background: var(--bg-subtle);
-      border-bottom: 1px solid var(--border-subtle);
-      color: var(--text-muted);
+      padding: 7px 10px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
       font-weight: 600;
       font-size: 10px;
     }
     .timeline-table td {
-      padding: 6px 8px;
-      border-bottom: 1px solid var(--border-subtle);
-      color: var(--text-charcoal);
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
       font-variant-numeric: tabular-nums;
     }
     .timeline-table tr.fraud-row td {
-      color: var(--red-accent);
+      color: var(--risk);
       font-weight: 600;
-      background: #FFFBFB;
+      background: #201314;
     }
 
     /* --- LOADING / EMPTY OVERLAYS --- */
@@ -714,7 +726,7 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(255, 255, 255, 0.85);
+      background: rgba(13, 17, 23, 0.85);
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -722,7 +734,7 @@
       gap: 10px;
       z-index: 25;
       font-size: 12px;
-      color: var(--text-muted);
+      color: var(--muted);
       font-weight: 500;
     }
     .loading-overlay.hidden {
@@ -732,8 +744,8 @@
     .spinner {
       width: 22px;
       height: 22px;
-      border: 2px solid var(--border-strong);
-      border-top-color: var(--text-charcoal);
+      border: 2px solid var(--border);
+      border-top-color: var(--text);
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
     }
@@ -767,8 +779,8 @@
     <div class="brand-group">
       <div class="shield-logo" aria-label="PulseGuard-Z Shield">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2L3 6V12C3 17.5 7 21.5 12 22C17 21.5 21 17.5 21 12V6L12 2Z" stroke="#1F2937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M12 7V17M7 12H17" stroke="#D92D20" stroke-width="2" stroke-linecap="round"/>
+          <path d="M12 2L3 6V12C3 17.5 7 21.5 12 22C17 21.5 21 17.5 21 12V6L12 2Z" stroke="#E6EDF3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M12 7V17M7 12H17" stroke="#F04438" stroke-width="2" stroke-linecap="round"/>
         </svg>
       </div>
       <span class="brand-title">PulseGuard-Z</span>
@@ -883,7 +895,7 @@
 
       <div class="alerts-list" id="alerts-container">
         <!-- Rendered safely via JavaScript -->
-        <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px;">
+        <div style="padding: 20px; text-align: center; color: var(--muted); font-size: 12px;">
           Loading priority alerts...
         </div>
       </div>
@@ -1126,7 +1138,7 @@
 
           alertsContainer.innerHTML = "";
           if (accounts.length === 0) {
-            alertsContainer.innerHTML = '<div style="padding:20px;text-align:center;color:#6B7280;font-size:12px;">No suspicious accounts detected at threshold ' + DEFAULT_THRESHOLD + '.</div>';
+            alertsContainer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px;">No suspicious accounts detected at threshold ' + DEFAULT_THRESHOLD + '.</div>';
             return;
           }
 
@@ -1196,7 +1208,7 @@
           });
         } catch (err) {
           console.error("Alerts load failed:", err);
-          alertsContainer.innerHTML = '<div style="padding:16px;text-align:center;color:#D92D20;font-size:11px;">Error loading alerts from backend.</div>';
+          alertsContainer.innerHTML = '<div style="padding:16px;text-align:center;color:var(--risk);font-size:11px;">Error loading alerts from backend.</div>';
         }
       }
 
@@ -1270,14 +1282,14 @@
               selector: "node",
               style: {
                 "label": "data(label)",
-                "color": "#4B5563",
+                "color": "#8B949E",
                 "font-size": "9px",
-                "font-family": "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
+                "font-family": "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
                 "font-weight": 500,
                 "text-valign": "bottom",
                 "text-margin-y": 4,
-                "background-color": "#F3F4F6",
-                "border-color": "#9CA3AF",
+                "background-color": "#4B5563",
+                "border-color": "#262C36",
                 "border-width": 1.5,
                 "width": 26,
                 "height": 26,
@@ -1285,14 +1297,14 @@
                 "transition-duration": "0.15s"
               }
             },
-            // Flagged for Review (Red Accent Exclusively)
+            // Flagged for Review (Red Accent Exclusively: #F04438)
             {
               selector: "node[?is_flagged]",
               style: {
-                "background-color": "#D92D20",
-                "border-color": "#111827",
+                "background-color": "#F04438",
+                "border-color": "#E6EDF3",
                 "border-width": 2,
-                "color": "#111827",
+                "color": "#E6EDF3",
                 "font-weight": 700,
                 "font-size": "10px",
                 "width": 34,
@@ -1303,34 +1315,34 @@
             {
               selector: "node:selected, node.focused",
               style: {
-                "border-color": "#111827",
+                "border-color": "#E6EDF3",
                 "border-width": 3,
-                "underlay-color": "#D92D20",
+                "underlay-color": "#F04438",
                 "underlay-padding": 5,
-                "underlay-opacity": 0.25
+                "underlay-opacity": 0.3
               }
             },
-            // Standard Normal Edge
+            // Standard Normal Edge (#30363D)
             {
               selector: "edge",
               style: {
                 "curve-style": "bezier",
                 "target-arrow-shape": "triangle",
                 "arrow-scale": 0.8,
-                "line-color": "#D1D5DB",
-                "target-arrow-color": "#9CA3AF",
+                "line-color": "#30363D",
+                "target-arrow-color": "#30363D",
                 "width": 1.5,
-                "opacity": 0.75,
+                "opacity": 0.8,
                 "transition-property": "line-color, width, opacity",
                 "transition-duration": "0.15s"
               }
             },
-            // Suspicious / Fraud Edge (Red Accent)
+            // Suspicious / Fraud Edge (Red Accent: #F04438)
             {
               selector: "edge[?is_fraud]",
               style: {
-                "line-color": "#D92D20",
-                "target-arrow-color": "#D92D20",
+                "line-color": "#F04438",
+                "target-arrow-color": "#F04438",
                 "width": 2.5,
                 "opacity": 0.95
               }
@@ -1339,7 +1351,7 @@
             {
               selector: "edge.pulse-active",
               style: {
-                "line-color": "#D92D20",
+                "line-color": "#F04438",
                 "width": 4.5,
                 "opacity": 1.0,
                 "z-index": 10
@@ -1446,8 +1458,8 @@
         document.getElementById("drawer-sent").textContent = "—";
         document.getElementById("drawer-net").textContent = "—";
         document.getElementById("drawer-fraud-tx").textContent = "—";
-        document.getElementById("drawer-signals-list").innerHTML = '<div style="font-size:11px;color:#6B7280;">Loading signal explanations...</div>';
-        document.getElementById("drawer-tx-tbody").innerHTML = '<tr><td colspan="4" style="text-align:center;color:#6B7280;padding:12px;">Loading transaction history...</td></tr>';
+        document.getElementById("drawer-signals-list").innerHTML = '<div style="font-size:11px;color:var(--muted);">Loading signal explanations...</div>';
+        document.getElementById("drawer-tx-tbody").innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:12px;">Loading transaction history...</td></tr>';
 
         // Open drawer
         detailDrawer.classList.add("open");
@@ -1485,7 +1497,7 @@
 
         const signalsDetail = inv.signals_detail || [];
         if (signalsDetail.length === 0) {
-          signalsListContainer.innerHTML = '<div style="font-size:11px;color:#6B7280;">No dominant fraud signals triggered.</div>';
+          signalsListContainer.innerHTML = '<div style="font-size:11px;color:var(--muted);">No dominant fraud signals triggered.</div>';
         } else {
           signalsDetail.forEach((sig) => {
             const card = document.createElement("div");
@@ -1523,7 +1535,7 @@
         const txs = detail.recent_transactions || [];
 
         if (txs.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#6B7280;padding:12px;">No transactions recorded.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:12px;">No transactions recorded.</td></tr>';
         } else {
           txs.forEach((tx) => {
             const tr = document.createElement("tr");
@@ -1581,8 +1593,6 @@
 
           const currentEdge = edges[step];
           const cyEdge = cyInstance.getElementById(currentEdge.id);
-          const sourceNode = cyInstance.getElementById(currentEdge.source);
-          const targetNode = cyInstance.getElementById(currentEdge.target);
 
           // Update banner
           simBannerText.textContent = `Synthetic Replay [${step + 1}/${edges.length}] · ${currentEdge.timestamp.substring(11, 19)}: ${currentEdge.source} → ${currentEdge.target} ($${currentEdge.amount}) [${currentEdge.is_fraud ? "FLAGGED FRAUD" : "Normal"}]`;
