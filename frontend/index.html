@@ -3,1686 +3,601 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PulseGuard-Z — Flash Fraud Detection on IBM LinuxONE</title>
-  <!-- Google Fonts: Inter -->
+  <title>PulseGuard-Z — Fraud Detection System on IBM LinuxONE</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <!-- Cytoscape.js CDN for interactive transaction graph -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
   <style>
-    /* ==========================================================================
-       PulseGuard-Z Dark Theme Design System
-       Palette: Exact specification
-         --bg: #0D1117;
-         --surface: #161B22;
-         --border: #262C36;
-         --text: #E6EDF3;
-         --muted: #8B949E;
-         --node-normal: #4B5563;
-         --edge-normal: #30363D;
-         --risk: #F04438;
-       No gradients, glows, neon, or heavy shadows.
-       ========================================================================== */
     :root {
-      --bg: #0D1117;
-      --surface: #161B22;
-      --border: #262C36;
-      --text: #E6EDF3;
-      --muted: #8B949E;
-      --node-normal: #4B5563;
-      --edge-normal: #30363D;
-      --risk: #F04438;
-      --font-stack: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
-    }
-
-    *, *::before, *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: var(--font-stack);
-      background-color: var(--bg);
-      color: var(--text);
-      height: 100vh;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* --- TOP BAR --- */
-    .topbar {
-      height: 52px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 20px;
-      flex-shrink: 0;
-      z-index: 20;
-    }
-
-    .brand-group {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .shield-logo {
-      width: 24px;
-      height: 24px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .brand-title {
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--text);
-      letter-spacing: -0.2px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .brand-subtitle {
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--muted);
-      padding-left: 8px;
-      border-left: 1px solid var(--border);
-      letter-spacing: 0.1px;
-    }
-
-    .topbar-actions {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-
-    .api-status {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      color: var(--muted);
-      font-weight: 500;
-    }
-
-    .status-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background-color: var(--muted);
-    }
-    .status-dot.connected {
-      background-color: var(--text);
-    }
-    .status-dot.error {
-      background-color: var(--risk);
-    }
-
-    .refresh-meta {
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .btn {
-      font-family: inherit;
-      font-size: 12px;
-      font-weight: 600;
-      padding: 6px 14px;
-      border-radius: 10px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: background-color 0.15s ease, border-color 0.15s ease;
-    }
-
-    .btn-secondary {
-      background: var(--surface);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .btn-secondary:hover {
-      background: var(--edge-normal);
-      border-color: var(--muted);
-    }
-
-    .btn-primary {
-      background: var(--surface);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .btn-primary:hover {
-      background: var(--edge-normal);
-      border-color: var(--muted);
-    }
-
-    .btn-sim-active {
-      background: var(--risk);
-      border-color: var(--risk);
-      color: #FFFFFF;
-    }
-    .btn-sim-active:hover {
-      background: #D92D20;
-    }
-
-    /* --- NOTIFICATION / ERROR BANNER --- */
-    .banner {
-      display: none;
-      background: #1C1315;
-      border-bottom: 1px solid #4D1A1C;
-      color: var(--risk);
-      padding: 8px 20px;
-      font-size: 12px;
-      font-weight: 500;
-      align-items: center;
-      justify-content: space-between;
-      flex-shrink: 0;
-      z-index: 15;
-    }
-    .banner.visible {
-      display: flex;
-    }
-    .banner-btn {
-      background: transparent;
-      border: 1px solid var(--risk);
-      color: var(--risk);
-      padding: 3px 8px;
-      border-radius: 6px;
-      font-size: 11px;
-      cursor: pointer;
-      font-weight: 600;
-    }
-
-    /* --- THREE METRIC CARDS ROW --- */
-    .metrics-bar {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      padding: 12px 20px;
-      background: var(--bg);
-      flex-shrink: 0;
-    }
-
-    .metric-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 18px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .metric-label {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--muted);
-    }
-
-    .metric-value-row {
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-    }
-
-    .metric-value {
-      font-size: 22px;
-      font-weight: 700;
-      color: var(--text);
-      letter-spacing: -0.4px;
-      font-variant-numeric: tabular-nums;
-    }
-    .metric-value.red-alert {
-      color: var(--risk);
-    }
-
-    .metric-desc {
-      font-size: 11px;
-      color: var(--muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    /* --- MAIN CONTENT SPLIT (70% GRAPH / 30% ALERTS) --- */
-    .main-workspace {
-      flex: 1;
-      display: flex;
-      padding: 0 20px 16px 20px;
-      gap: 16px;
-      min-height: 0;
-      position: relative;
-    }
-
-    /* --- GRAPH CONTAINER (70%) --- */
-    .graph-pane {
-      flex: 7;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-      overflow: hidden;
-      min-width: 0;
-    }
-
-    .pane-header {
-      height: 42px;
-      border-bottom: 1px solid var(--border);
-      padding: 0 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-shrink: 0;
-      background: var(--surface);
-    }
-
-    .pane-title {
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.1px;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .pane-badge {
-      font-size: 11px;
-      font-weight: 500;
-      background: var(--bg);
-      color: var(--muted);
-      padding: 2px 8px;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-    }
-
-    .graph-controls {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .btn-icon {
-      width: 28px;
-      height: 28px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-    }
-    .btn-icon:hover {
-      background: var(--edge-normal);
-      border-color: var(--muted);
-    }
-
-    #cy-container {
-      flex: 1;
-      width: 100%;
-      height: 100%;
-      background: var(--bg);
-      position: relative;
-    }
-
-    /* Tiny Legend (Bottom of Graph) */
-    .graph-legend {
-      position: absolute;
-      bottom: 12px;
-      left: 14px;
-      background: rgba(22, 27, 34, 0.95);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 6px 14px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      font-size: 11px;
-      color: var(--muted);
-      z-index: 5;
-      pointer-events: none;
-    }
-
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .legend-indicator-node {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-    .legend-indicator-node.normal {
-      background: var(--node-normal);
-      border: 1px solid var(--border);
-    }
-    .legend-indicator-node.flagged {
-      background: var(--risk);
-      border: 1px solid var(--text);
-    }
-
-    .legend-indicator-edge {
-      width: 14px;
-      height: 2px;
-    }
-    .legend-indicator-edge.normal {
-      background: var(--edge-normal);
-    }
-    .legend-indicator-edge.suspicious {
-      background: var(--risk);
-    }
-
-    /* Simulation Tracker Overlay */
-    .sim-progress-banner {
-      display: none;
-      position: absolute;
-      top: 50px;
-      left: 14px;
-      right: 14px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 8px 14px;
-      font-size: 11px;
-      color: var(--text);
-      z-index: 10;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .sim-progress-banner.active {
-      display: flex;
-    }
-
-    /* --- ALERTS PANE (30%) --- */
-    .alerts-pane {
-      flex: 3;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      display: flex;
-      flex-direction: column;
-      min-width: 280px;
-      overflow: hidden;
-    }
-
-    .alerts-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .alert-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px 14px;
-      cursor: pointer;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      transition: border-color 0.15s ease, background-color 0.15s ease;
-      position: relative;
-    }
-    .alert-card:hover {
-      border-color: var(--muted);
-      background: #1C2128;
-    }
-    .alert-card.selected {
-      border-color: var(--risk);
-      background: #201314;
-    }
-
-    .alert-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .alert-acct-id {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    }
-
-    .score-badge {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--risk);
-      background: #261717;
-      border: 1px solid #4D1A1C;
-      padding: 2px 7px;
-      border-radius: 6px;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .alert-details {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .alert-type-tag {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      color: var(--muted);
-      padding: 1px 6px;
-      border-radius: 4px;
-      text-transform: capitalize;
-    }
-
-    .alert-signal {
-      font-size: 11px;
-      color: var(--text);
-      font-weight: 500;
-      line-height: 1.3;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .alerts-footnote {
-      padding: 10px 14px;
-      border-top: 1px solid var(--border);
-      font-size: 10px;
-      color: var(--muted);
-      background: var(--surface);
-      text-align: center;
-    }
-
-    /* --- SLIDE-IN DETAIL PANEL --- */
-    .drawer-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.6);
-      z-index: 40;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.2s ease;
-    }
-    .drawer-overlay.open {
-      opacity: 1;
-      pointer-events: auto;
-    }
-
-    .detail-drawer {
-      position: fixed;
-      top: 0;
-      right: 0;
-      bottom: 0;
-      width: 440px;
-      max-width: 90vw;
-      background: var(--surface);
-      border-left: 1px solid var(--border);
-      color: var(--text);
-      z-index: 50;
-      display: flex;
-      flex-direction: column;
-      transform: translateX(100%);
-      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .detail-drawer.open {
-      transform: translateX(0);
-    }
-
-    .drawer-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-shrink: 0;
-      background: var(--surface);
-    }
-
-    .drawer-title-group {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .drawer-title {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--text);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    }
-
-    .drawer-subtitle {
-      font-size: 11px;
-      color: var(--muted);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .btn-close {
-      width: 28px;
-      height: 28px;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--text);
-      font-size: 16px;
-      font-weight: 500;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-    }
-    .btn-close:hover {
-      background: var(--edge-normal);
-      border-color: var(--muted);
-    }
-
-    .drawer-content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
-    .section-title {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--muted);
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .score-summary-box {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px;
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
-    }
-
-    .summary-cell {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-    .cell-label {
-      font-size: 10px;
-      color: var(--muted);
-      font-weight: 500;
-    }
-    .cell-val {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--text);
-      font-variant-numeric: tabular-nums;
-    }
-    .cell-val.alert-red {
-      color: var(--risk);
-    }
-
-    .signal-card {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px 14px;
-      background: var(--bg);
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      margin-bottom: 8px;
-    }
-    .signal-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-    }
-    .signal-badge {
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--risk);
-      background: #261717;
-      border: 1px solid #4D1A1C;
-      padding: 1px 6px;
-      border-radius: 4px;
-    }
-    .signal-body {
-      font-size: 11px;
-      color: var(--text);
-      line-height: 1.4;
-    }
-    .signal-action {
-      font-size: 10px;
-      color: var(--muted);
-      margin-top: 4px;
-      padding-top: 4px;
-      border-top: 1px dashed var(--border);
-    }
-
-    .timeline-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 11px;
-    }
-    .timeline-table th {
-      text-align: left;
-      padding: 7px 10px;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      color: var(--muted);
-      font-weight: 600;
-      font-size: 10px;
-    }
-    .timeline-table td {
-      padding: 7px 10px;
-      border-bottom: 1px solid var(--border);
-      color: var(--text);
-      font-variant-numeric: tabular-nums;
-    }
-    .timeline-table tr.fraud-row td {
-      color: var(--risk);
-      font-weight: 600;
-      background: #201314;
-    }
-
-    /* --- LOADING / EMPTY OVERLAYS --- */
-    .loading-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(13, 17, 23, 0.85);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      z-index: 25;
-      font-size: 12px;
-      color: var(--muted);
-      font-weight: 500;
-    }
-    .loading-overlay.hidden {
-      display: none;
-    }
-
-    .spinner {
-      width: 22px;
-      height: 22px;
-      border: 2px solid var(--border);
-      border-top-color: var(--text);
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    @media (max-width: 900px) {
-      .main-workspace {
-        flex-direction: column;
-        overflow-y: auto;
-      }
-      .graph-pane {
-        min-height: 400px;
-        flex: none;
-      }
-      .alerts-pane {
-        flex: none;
-        min-height: 260px;
-      }
-      body {
-        overflow: auto;
-      }
-    }
+      --canvas-bg:#030705; --panel-bg:#070d0a; --card-bg:#0b1410; --card-hover:#0f1c16;
+      --border-em:rgba(16,185,129,0.25); --border-subtle:#12241b; --border-bright:rgba(0,255,136,0.45);
+      --text-white:#fff; --text-heading:#f0fdf4; --text-body:#e2e8f0;
+      --text-muted:#718096; --text-dim:#4a5568; --text-secondary:#94a3b8;
+      --em-neon:#00ff88; --em-bright:#34d399; --em-primary:#10b981;
+      --em-glow:rgba(16,185,129,0.16); --em-glow-s:rgba(0,255,136,0.28);
+      --risk-red:#ef4444; --risk-bright:#f87171;
+      --risk-bg:rgba(239,68,68,0.12); --risk-border:rgba(239,68,68,0.45); --risk-glow:rgba(239,68,68,0.26);
+      --amber:#f59e0b; --amber-bg:rgba(245,158,11,0.12); --amber-border:rgba(245,158,11,0.35);
+      --font-sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+      --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      --sidebar:280px; --rp:360px;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    html,body{height:100%;width:100%;background:var(--canvas-bg);color:var(--text-body);font-family:var(--font-sans);overflow:hidden;-webkit-font-smoothing:antialiased;}
+    .app{display:flex;height:100vh;width:100vw;overflow:hidden;}
+    /* ---- SIDEBAR ---- */
+    .sidebar{width:var(--sidebar);min-width:var(--sidebar);height:100vh;background:var(--panel-bg);border-right:1px solid var(--border-em);display:flex;flex-direction:column;flex-shrink:0;z-index:25;}
+    .sb-brand{padding:18px 18px 14px;border-bottom:1px solid var(--border-subtle);display:flex;flex-direction:column;gap:6px;}
+    .brand-row{display:flex;align-items:center;gap:10px;}
+    .brand-icon{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,rgba(16,185,129,0.22),rgba(6,78,59,0.4));border:1px solid var(--border-bright);display:flex;align-items:center;justify-content:center;color:var(--em-neon);box-shadow:0 0 14px var(--em-glow-s);flex-shrink:0;}
+    .brand-icon svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+    .brand-name{font-size:17px;font-weight:800;letter-spacing:-0.4px;color:var(--text-white);line-height:1.15;}
+    .brand-name .nz{color:var(--em-neon);text-shadow:0 0 8px rgba(0,255,136,0.5);}
+    .brand-sub{font-size:9.5px;font-weight:700;letter-spacing:1.4px;color:var(--em-bright);text-transform:uppercase;margin-top:2px;}
+    .brand-chip{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;margin-top:6px;padding:3px 8px;border-radius:4px;font-size:10px;font-family:var(--font-mono);font-weight:600;background:rgba(16,185,129,0.08);border:1px solid var(--border-em);color:var(--em-bright);}
+    .chip-dot{width:6px;height:6px;border-radius:50%;background:var(--em-neon);box-shadow:0 0 6px var(--em-neon);}
+    .sb-nav{flex:1;overflow-y:auto;padding:10px 10px;display:flex;flex-direction:column;gap:2px;}
+    .nav-gl{font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;padding:10px 12px 6px;}
+    .nav-item{display:flex;align-items:center;gap:11px;padding:9px 14px;border-radius:6px;color:var(--text-secondary);font-size:13px;font-weight:500;cursor:pointer;position:relative;transition:all 0.16s;user-select:none;border:1px solid transparent;}
+    .nav-item:hover{background:var(--card-hover);color:var(--text-white);border-color:rgba(16,185,129,0.15);}
+    .nav-item.active{background:linear-gradient(90deg,rgba(16,185,129,0.14),rgba(16,185,129,0.04));color:var(--text-white);font-weight:600;border:1px solid rgba(16,185,129,0.45);box-shadow:0 0 16px rgba(16,185,129,0.1);}
+    .nav-item.active::before{content:"";position:absolute;left:-1px;top:-1px;bottom:-1px;width:4px;background:var(--em-neon);border-radius:6px 0 0 6px;box-shadow:0 0 10px var(--em-neon);}
+    .nav-item svg{width:16px;height:16px;stroke-width:1.8;stroke:currentColor;fill:none;flex-shrink:0;}
+    .nav-item.active svg{stroke:var(--em-neon);}
+    .nav-badge{margin-left:auto;font-size:10px;font-family:var(--font-mono);padding:1px 6px;border-radius:4px;background:rgba(16,185,129,0.15);color:var(--em-bright);border:1px solid var(--border-em);}
+    .nav-badge.ab{background:var(--risk-bg);color:var(--risk-bright);border-color:var(--risk-border);}
+    .sb-foot{padding:12px 16px;border-top:1px solid var(--border-subtle);background:#050a07;display:flex;flex-direction:column;gap:5px;}
+    .foot-row{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-muted);}
+    .soc-live{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--em-bright);margin-top:4px;}
+    .pdot{width:7px;height:7px;border-radius:50%;background:var(--em-neon);box-shadow:0 0 8px var(--em-neon);animation:pdot 2s infinite ease-in-out;}
+    @keyframes pdot{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.5;transform:scale(0.85);}}
+    /* ---- MAIN ---- */
+    .main{flex:1;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--canvas-bg);}
+    .mhdr{height:60px;min-height:60px;background:var(--panel-bg);border-bottom:1px solid var(--border-em);padding:0 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;z-index:20;}
+    .hl{display:flex;align-items:center;gap:14px;}
+    .pg-title{font-size:18px;font-weight:800;color:var(--text-white);letter-spacing:-0.3px;}
+    .pg-title .ta{color:var(--em-neon);}
+    .pg-sub{font-size:11px;color:var(--text-muted);padding-left:12px;border-left:1px solid var(--border-subtle);font-family:var(--font-mono);}
+    .hr{display:flex;align-items:center;gap:8px;}
+    .thresh-box{display:flex;align-items:center;gap:8px;background:var(--card-bg);border:1px solid var(--border-em);padding:5px 12px;border-radius:6px;font-size:11px;color:var(--text-secondary);}
+    .tl{font-weight:600;color:var(--text-heading);display:flex;align-items:center;gap:4px;}
+    .thresh-slider{width:80px;height:4px;accent-color:var(--em-neon);cursor:pointer;}
+    .tv{font-family:var(--font-mono);font-weight:700;color:var(--em-neon);min-width:28px;}
+    .pg{display:flex;gap:3px;margin-left:4px;}
+    .bp{background:rgba(16,185,129,0.08);border:1px solid var(--border-em);color:var(--text-secondary);font-family:var(--font-mono);font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;cursor:pointer;transition:all 0.15s;}
+    .bp:hover{background:rgba(16,185,129,0.2);color:var(--text-white);}
+    .bp.active{background:var(--em-primary);color:#030705;font-weight:700;border-color:var(--em-neon);box-shadow:0 0 8px rgba(0,255,136,0.4);}
+    .bact{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;transition:all 0.15s;background:var(--card-bg);border:1px solid var(--border-em);color:var(--text-heading);}
+    .bact:hover{background:var(--card-hover);border-color:var(--border-bright);color:var(--text-white);}
+    .bact svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;}
+    .bsim{background:rgba(16,185,129,0.12);border-color:var(--border-bright);color:var(--em-neon);}
+    .bsim:hover{background:rgba(16,185,129,0.22);}
+    .bsim.simulating{background:rgba(239,68,68,0.15);border-color:var(--risk-border);color:var(--risk-bright);}
+    .spill{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:6px;font-size:11px;font-family:var(--font-mono);background:rgba(16,185,129,0.08);border:1px solid var(--border-em);color:var(--em-bright);}
+    /* ---- BODY ---- */
+    .dbody{flex:1;display:flex;flex-direction:column;padding:14px 18px;gap:12px;overflow:hidden;}
+    .mrow{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;flex-shrink:0;}
+    .mcard{background:var(--card-bg);border:1px solid var(--border-em);border-radius:8px;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;position:relative;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,0.5);transition:border-color 0.18s;}
+    .mcard:hover{border-color:var(--border-bright);box-shadow:0 4px 16px rgba(0,0,0,0.6),0 0 12px var(--em-glow);}
+    .mcard::after{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--em-neon),transparent);opacity:0.7;}
+    .mi{display:flex;flex-direction:column;gap:3px;}
+    .ml{font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.6px;}
+    .mv{font-size:22px;font-weight:800;color:var(--text-white);font-family:var(--font-mono);letter-spacing:-0.5px;line-height:1.15;}
+    .mv.rv{color:var(--risk-bright);text-shadow:0 0 10px var(--risk-glow);}
+    .ms{font-size:10px;color:var(--em-bright);}
+    .mic{width:40px;height:40px;border-radius:8px;background:rgba(16,185,129,0.08);border:1px solid var(--border-em);display:flex;align-items:center;justify-content:center;color:var(--em-bright);flex-shrink:0;}
+    .mic.ri{background:var(--risk-bg);border-color:var(--risk-border);color:var(--risk-bright);}
+    .mic svg{width:20px;height:20px;stroke-width:1.8;stroke:currentColor;fill:none;}
+    .wrow{flex:1;display:flex;gap:12px;min-height:0;}
+    .csec{flex:1;display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0;}
+    /* ---- GRAPH ---- */
+    .gcrd{flex:1;background:var(--card-bg);border:1px solid var(--border-em);border-radius:8px;display:flex;flex-direction:column;position:relative;overflow:hidden;min-height:220px;}
+    .phdr{height:40px;padding:0 14px;background:#070d0a;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;z-index:5;}
+    .ptit{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-heading);display:flex;align-items:center;gap:8px;}
+    .tdot{width:6px;height:6px;border-radius:50%;background:var(--em-neon);box-shadow:0 0 6px var(--em-neon);}
+    .gtools{display:flex;align-items:center;gap:5px;}
+    .btool{width:26px;height:26px;border-radius:4px;background:var(--panel-bg);border:1px solid var(--border-em);color:var(--text-secondary);display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;transition:all 0.15s;}
+    .btool:hover{background:var(--card-hover);color:var(--text-white);border-color:var(--border-bright);}
+    #cy{flex:1;width:100%;height:100%;background:radial-gradient(circle at center,#0a130f,#030705);position:relative;}
+    .gleg{position:absolute;bottom:10px;left:12px;background:rgba(7,13,10,0.94);border:1px solid var(--border-em);border-radius:6px;padding:6px 12px;display:flex;align-items:center;gap:14px;font-size:10.5px;color:var(--text-secondary);z-index:5;backdrop-filter:blur(6px);}
+    .lchip{display:flex;align-items:center;gap:5px;}
+    .lg{width:9px;height:9px;}
+    .lg.govt{background:#059669;border:1px solid var(--em-bright);transform:rotate(45deg);}
+    .lg.merch{background:#0284c7;border:1px solid #38bdf8;border-radius:2px;}
+    .lg.agent{background:#d97706;border:1px solid #fbbf24;border-radius:2px;}
+    .lg.benef{background:#4b5563;border:1px solid #94a3b8;border-radius:50%;}
+    .lg.mule{background:var(--risk-red);border:1px solid #fecaca;border-radius:50%;box-shadow:0 0 6px var(--risk-glow);}
+    .sim-ban{display:none;position:absolute;top:10px;left:12px;right:12px;background:rgba(11,20,16,0.96);border:1px solid var(--border-bright);border-radius:6px;padding:8px 14px;font-size:11px;color:var(--text-heading);z-index:10;align-items:center;justify-content:space-between;}
+    .sim-ban.active{display:flex;}
+    .ntip{position:absolute;background:rgba(7,13,10,0.96);border:1px solid var(--border-bright);color:var(--text-white);padding:8px 12px;border-radius:6px;font-size:11px;pointer-events:none;z-index:50;display:none;max-width:260px;}
+    /* ---- ALERTS STRIP ---- */
+    .astrip{height:128px;min-height:128px;background:var(--card-bg);border:1px solid var(--border-em);border-radius:8px;display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;}
+    .ahdr{height:32px;padding:0 12px;background:#070d0a;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+    .atit{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-heading);display:flex;align-items:center;gap:6px;}
+    .agrid{flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:8px 10px;overflow-x:auto;}
+    .acrd{background:#070d0a;border:1px solid rgba(239,68,68,0.35);border-radius:6px;padding:7px 9px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;transition:all 0.16s;}
+    .acrd:hover{background:rgba(239,68,68,0.08);border-color:var(--risk-bright);transform:translateY(-2px);box-shadow:0 4px 12px rgba(239,68,68,0.2);}
+    .acrd.selected{border-color:var(--em-neon);box-shadow:0 0 10px var(--em-glow-s);background:rgba(16,185,129,0.08);}
+    .atop{display:flex;align-items:center;justify-content:space-between;}
+    .aid{font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--text-white);}
+    .ascore{font-size:9.5px;font-family:var(--font-mono);font-weight:700;padding:1px 5px;border-radius:3px;background:var(--risk-bg);border:1px solid var(--risk-border);color:var(--risk-bright);}
+    .asig{font-size:10px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
+    .afoot{display:flex;align-items:center;justify-content:space-between;font-size:9.5px;color:var(--text-muted);border-top:1px solid rgba(255,255,255,0.05);padding-top:3px;margin-top:2px;}
+    .afoot .rt{color:var(--risk-bright);font-weight:600;}
+    /* ---- INVESTIGATION PANEL ---- */
+    .inv{width:var(--rp);min-width:var(--rp);background:var(--card-bg);border:1px solid var(--border-em);border-radius:8px;display:flex;flex-direction:column;overflow:hidden;}
+    .invhdr{height:40px;padding:0 14px;background:#070d0a;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+    .invtit{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-heading);display:flex;align-items:center;gap:6px;}
+    .invtit svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;}
+    .bclr{background:transparent;border:1px solid var(--border-em);color:var(--text-muted);font-size:10px;padding:2px 7px;border-radius:4px;cursor:pointer;transition:all 0.15s;display:none;}
+    .bclr:hover{color:var(--text-white);border-color:var(--border-bright);}
+    .bclr.show{display:block;}
+    .iempty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px 22px;text-align:center;gap:12px;}
+    .eico{width:72px;height:72px;border-radius:50%;background:radial-gradient(circle,rgba(16,185,129,0.12),rgba(3,7,5,0));border:1px dashed var(--border-bright);display:flex;align-items:center;justify-content:center;animation:rslow 18s linear infinite;}
+    @keyframes rslow{to{transform:rotate(360deg);}}
+    .eico svg{width:32px;height:32px;stroke-width:1.6;stroke:var(--em-neon);fill:none;}
+    .ehdg{font-size:15px;font-weight:700;color:var(--text-white);}
+    .edesc{font-size:11.5px;color:var(--text-muted);line-height:1.5;max-width:250px;}
+    .ehint{font-size:10.5px;font-family:var(--font-mono);color:var(--em-bright);background:rgba(16,185,129,0.08);border:1px solid var(--border-em);padding:6px 12px;border-radius:4px;}
+    .idet{flex:1;overflow-y:auto;padding:14px;display:none;flex-direction:column;gap:14px;}
+    .idet.visible{display:flex;}
+    .ame{background:#070d0a;border:1px solid var(--border-em);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;}
+    .aidr{display:flex;align-items:center;justify-content:space-between;}
+    .acid{font-size:15px;font-weight:800;font-family:var(--font-mono);color:var(--text-white);}
+    .actype{font-size:10.5px;color:var(--text-muted);}
+    .sbadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;text-transform:uppercase;font-family:var(--font-mono);}
+    .sbadge.fraud{background:var(--risk-bg);border:1px solid var(--risk-border);color:var(--risk-bright);}
+    .sbadge.normal{background:rgba(16,185,129,0.1);border:1px solid var(--border-em);color:var(--em-bright);}
+    .stit{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--em-bright);margin-bottom:6px;}
+    .sgrid,.fgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;background:#070d0a;border:1px solid var(--border-subtle);border-radius:6px;padding:10px;}
+    .scl{display:flex;flex-direction:column;gap:2px;}
+    .scll{font-size:9.5px;color:var(--text-muted);text-transform:uppercase;font-weight:600;}
+    .sclv{font-size:13px;font-family:var(--font-mono);font-weight:700;color:var(--text-white);}
+    .sclv.red{color:var(--risk-bright);}
+    .sclv.green{color:var(--em-neon);}
+    .sigl{display:flex;flex-direction:column;gap:6px;}
+    .sigc{background:#070d0a;border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;}
+    .sigc.crit{border-left:3px solid var(--risk-bright);}
+    .sigc.med{border-left:3px solid var(--amber);}
+    .sigh{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;color:var(--text-heading);}
+    .sigt{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase;font-family:var(--font-mono);}
+    .sigt.CRITICAL{background:var(--risk-bg);color:var(--risk-bright);border:1px solid var(--risk-border);}
+    .sigt.HIGH,.sigt.FLAG{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border);}
+    .sigb{font-size:10.5px;color:var(--text-muted);line-height:1.4;}
+    .siga{font-size:10px;color:var(--em-bright);font-family:var(--font-mono);}
+    .tlt{width:100%;border-collapse:collapse;font-size:10.5px;}
+    .tlt th{text-align:left;padding:5px 7px;color:var(--text-dim);font-size:9.5px;text-transform:uppercase;border-bottom:1px solid var(--border-subtle);}
+    .tlt td{padding:5px 7px;border-bottom:1px solid rgba(255,255,255,0.03);color:var(--text-secondary);}
+    .tlt tr.fr td{background:rgba(239,68,68,0.06);color:var(--risk-bright);}
+    .lovo{position:fixed;inset:0;background:rgba(3,7,5,0.9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:999;transition:opacity 0.3s;}
+    .lovo.hidden{opacity:0;pointer-events:none;}
+    .glo{position:absolute;inset:0;background:rgba(3,7,5,0.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;z-index:10;transition:opacity 0.3s;}
+    .glo.hidden{opacity:0;pointer-events:none;}
+    .spin{width:32px;height:32px;border:2px solid var(--border-em);border-top-color:var(--em-neon);border-radius:50%;animation:sp 0.8s linear infinite;}
+    @keyframes sp{to{transform:rotate(360deg);}}
+    .errb{position:fixed;top:12px;right:18px;background:#1f0707;border:1px solid var(--risk-border);color:var(--risk-bright);padding:10px 16px;border-radius:6px;font-size:12px;display:none;align-items:center;gap:10px;z-index:200;}
+    .errb.visible{display:flex;}
+    ::-webkit-scrollbar{width:5px;height:5px;}
+    ::-webkit-scrollbar-track{background:var(--canvas-bg);}
+    ::-webkit-scrollbar-thumb{background:var(--border-em);border-radius:3px;}
+    ::-webkit-scrollbar-thumb:hover{background:var(--border-bright);}
   </style>
 </head>
 <body>
-
-  <!-- Top Bar -->
-  <header class="topbar">
-    <div class="brand-group">
-      <div class="shield-logo" aria-label="PulseGuard-Z Shield">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2L3 6V12C3 17.5 7 21.5 12 22C17 21.5 21 17.5 21 12V6L12 2Z" stroke="#E6EDF3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M12 7V17M7 12H17" stroke="#F04438" stroke-width="2" stroke-linecap="round"/>
-        </svg>
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <div class="brand-row">
+        <div class="brand-icon"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+        <div>
+          <div class="brand-name">PulseGuard<span class="nz">-Z</span></div>
+          <div class="brand-sub">FRAUD DETECTION SYSTEM</div>
+        </div>
       </div>
-      <span class="brand-title">PulseGuard-Z</span>
-      <span class="brand-subtitle">IBM LinuxONE | SSF2026 G2P Flash Fraud Detection</span>
+      <div class="brand-chip"><span class="chip-dot"></span><span>IBM LinuxONE // SSF2026</span></div>
     </div>
-
-    <div class="topbar-actions">
-      <div class="api-status">
-        <div class="status-dot" id="api-dot"></div>
-        <span id="api-status-text">Checking API...</span>
+    <nav class="sb-nav">
+      <div class="nav-gl">Intelligence</div>
+      <div class="nav-item active">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span>Dashboard</span><span class="nav-badge">LIVE</span>
       </div>
-      <span class="refresh-meta" id="last-updated-text">Updating...</span>
-      <button class="btn btn-secondary" id="btn-refresh" title="Refresh metrics from backend">Refresh</button>
-      <button class="btn btn-primary" id="btn-simulation" title="Safely replay existing synthetic transactions through the network">Start simulation</button>
-    </div>
-  </header>
-
-  <!-- Error / Connection Warning Banner -->
-  <div class="banner" id="error-banner">
-    <span id="error-banner-text">API Disconnected: Unable to reach http://127.0.0.1:8000. Please launch backend (`python -m uvicorn backend.main:app`).</span>
-    <button class="banner-btn" id="btn-retry">Retry Connection</button>
-  </div>
-
-  <!-- Three Compact Metric Cards (Computed strictly from API fields) -->
-  <section class="metrics-bar" aria-label="System Metrics">
-    <div class="metric-card">
-      <span class="metric-label">Transactions Analysed</span>
-      <div class="metric-value-row">
-        <span class="metric-value" id="val-transactions">—</span>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        <span>Kill Chain Graph</span>
       </div>
-      <span class="metric-desc" id="desc-transactions">Total records in simulation window</span>
-    </div>
-
-    <div class="metric-card">
-      <span class="metric-label">Accounts Flagged</span>
-      <div class="metric-value-row">
-        <span class="metric-value red-alert" id="val-accounts">—</span>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Mule Accounts</span><span class="nav-badge ab" id="nav-badge-mules">82</span>
       </div>
-      <span class="metric-desc" id="desc-accounts">TGNN risk score ≥ 0.20 (calibrated cutoff)</span>
-    </div>
-
-    <div class="metric-card">
-      <span class="metric-label">Money at Risk</span>
-      <div class="metric-value-row">
-        <span class="metric-value red-alert" id="val-money">—</span>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span>Transactions</span>
       </div>
-      <span class="metric-desc" id="desc-money">Total volume in flagged fraudulent flows</span>
-    </div>
-  </section>
-
-  <!-- Main Workspace (70% Graph / 30% Alerts) -->
-  <main class="main-workspace">
-    <!-- Graph Pane (70%) -->
-    <div class="graph-pane">
-      <div class="pane-header">
-        <div class="pane-title">
-          <span>Transaction Network Topology</span>
-          <span class="pane-badge" id="graph-badge">Loading...</span>
-        </div>
-        <div class="graph-controls">
-          <button class="btn-icon" id="btn-zoom-in" title="Zoom in">+</button>
-          <button class="btn-icon" id="btn-zoom-out" title="Zoom out">−</button>
-          <button class="btn-icon" id="btn-fit" title="Fit network to screen">⛶</button>
-          <button class="btn-icon" id="btn-relayout" title="Re-run spring layout">↺</button>
-        </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+        <span>Payment Demo</span>
       </div>
-
-      <!-- Simulation Replay Tracker Overlay -->
-      <div class="sim-progress-banner" id="sim-banner">
-        <span id="sim-banner-text">Replaying synthetic transactions...</span>
-        <button class="btn btn-secondary" id="btn-stop-sim" style="padding: 2px 8px; font-size: 11px;">Stop</button>
+      <div class="nav-gl">Operations</div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <span>Cyber Risk SOC</span>
       </div>
-
-      <!-- Loading State for Graph -->
-      <div class="loading-overlay" id="graph-loading">
-        <div class="spinner"></div>
-        <span>Constructing temporal transaction graph...</span>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        <span>AI Reports</span>
       </div>
-
-      <!-- Cytoscape Network Container -->
-      <div id="cy-container" aria-label="Transaction Network Graph"></div>
-
-      <!-- Tiny Legend -->
-      <div class="graph-legend">
-        <div class="legend-item">
-          <div class="legend-indicator-node normal"></div>
-          <span>Unflagged account</span>
-        </div>
-        <div class="legend-item">
-          <div class="legend-indicator-node flagged"></div>
-          <span>Flagged for review (TGNN ≥ 0.20)</span>
-        </div>
-        <div class="legend-item">
-          <div class="legend-indicator-edge normal"></div>
-          <span>Normal transfer</span>
-        </div>
-        <div class="legend-item">
-          <div class="legend-indicator-edge suspicious"></div>
-          <span>Suspicious transfer</span>
-        </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <span>Live Demo</span>
       </div>
-    </div>
-
-    <!-- Alerts Pane (30%) - Exactly 4 high-priority alerts -->
-    <div class="alerts-pane">
-      <div class="pane-header">
-        <div class="pane-title">
-          <span>High-Priority Alerts</span>
-          <span class="pane-badge" id="alerts-badge">Top 4</span>
-        </div>
-      </div>
-
-      <div class="alerts-list" id="alerts-container">
-        <!-- Rendered safely via JavaScript -->
-        <div style="padding: 20px; text-align: center; color: var(--muted); font-size: 12px;">
-          Loading priority alerts...
-        </div>
-      </div>
-
-      <div class="alerts-footnote">
-        Ranked by TGNN risk score · Click alert to inspect account profile
-      </div>
-    </div>
-  </main>
-
-  <!-- Slide-In Detail Drawer -->
-  <div class="drawer-overlay" id="drawer-overlay"></div>
-  <aside class="detail-drawer" id="detail-drawer" aria-label="Account Investigation Drawer">
-    <div class="drawer-header">
-      <div class="drawer-title-group">
-        <span class="drawer-title" id="drawer-acct-id">—</span>
-        <span class="drawer-subtitle" id="drawer-acct-type">Loading profile...</span>
-      </div>
-      <button class="btn-close" id="btn-close-drawer" aria-label="Close detail panel">×</button>
-    </div>
-
-    <div class="drawer-content" id="drawer-content">
-      <!-- Risk & Decision Box -->
-      <div>
-        <div class="section-title">Model Scoring Evaluation</div>
-        <div class="score-summary-box">
-          <div class="summary-cell">
-            <span class="cell-label">TGNN Risk Score</span>
-            <span class="cell-val alert-red" id="drawer-score">—</span>
-          </div>
-          <div class="summary-cell">
-            <span class="cell-label">Decision Threshold</span>
-            <span class="cell-val" id="drawer-thresh">0.20</span>
-          </div>
-          <div class="summary-cell">
-            <span class="cell-label">Risk Assessment</span>
-            <span class="cell-val" id="drawer-risk-tier">—</span>
-          </div>
-          <div class="summary-cell">
-            <span class="cell-label">Rule Baseline</span>
-            <span class="cell-val" id="drawer-rule-flag">—</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Financial Flow Summary -->
-      <div>
-        <div class="section-title">Transactional Volumes</div>
-        <div class="score-summary-box">
-          <div class="summary-cell">
-            <span class="cell-label">Total Received</span>
-            <span class="cell-val" id="drawer-recv">—</span>
-          </div>
-          <div class="summary-cell">
-            <span class="cell-label">Total Sent</span>
-            <span class="cell-val" id="drawer-sent">—</span>
-          </div>
-          <div class="summary-cell">
-            <span class="cell-label">Net Inflow / Outflow</span>
-            <span class="cell-val" id="drawer-net">—</span>
-          </div>
-          <div class="summary-cell">
-            <span class="cell-label">Fraud Tx Involved</span>
-            <span class="cell-val alert-red" id="drawer-fraud-tx">—</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Driving Graph Signals -->
-      <div>
-        <div class="section-title">Driving Graph Signals & Typologies</div>
-        <div id="drawer-signals-list">
-          <!-- Dynamically populated -->
-        </div>
-      </div>
-
-      <!-- Recent Transaction Activity Timeline -->
-      <div>
-        <div class="section-title">Recent Activity Timeline (Real Records)</div>
-        <table class="timeline-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Counterparty</th>
-              <th>Amount</th>
-              <th>Type</th>
-            </tr>
-          </thead>
-          <tbody id="drawer-tx-tbody">
-            <!-- Dynamically populated -->
-          </tbody>
-        </table>
-      </div>
+    </nav>
+    <div class="sb-foot">
+      <div class="foot-row"><span>IBM z16 / LinuxONE III</span><span style="font-family:var(--font-mono);color:var(--em-bright);">4.8 GHz</span></div>
+      <div class="foot-row"><span>Model</span><span style="font-family:var(--font-mono);color:var(--text-white);">TGNN &middot; GNN-GRU</span></div>
+      <div class="soc-live"><span class="pdot"></span><span>SYSTEM OPERATIONAL</span></div>
     </div>
   </aside>
 
-  <!-- Application Logic -->
-  <script>
-    (function () {
-      "use strict";
-
-      // ----------------------------------------------------------------------
-      // Constants & Configuration
-      // ----------------------------------------------------------------------
-      const API_BASE = "http://127.0.0.1:8000/api";
-      const DEFAULT_THRESHOLD = 0.20;
-      const AUTO_REFRESH_INTERVAL_MS = 30000; // 30-second background refresh
-
-      // State Management
-      let cyInstance = null;
-      let isSimulating = false;
-      let simTimer = null;
-      let graphDataCache = null;
-      let activeAccountId = null;
-
-      // DOM Elements
-      const apiDot = document.getElementById("api-dot");
-      const apiStatusText = document.getElementById("api-status-text");
-      const lastUpdatedText = document.getElementById("last-updated-text");
-      const errorBanner = document.getElementById("error-banner");
-      const errorBannerText = document.getElementById("error-banner-text");
-      const btnRetry = document.getElementById("btn-retry");
-      const btnRefresh = document.getElementById("btn-refresh");
-      const btnSimulation = document.getElementById("btn-simulation");
-      const btnStopSim = document.getElementById("btn-stop-sim");
-      const simBanner = document.getElementById("sim-banner");
-      const simBannerText = document.getElementById("sim-banner-text");
-
-      const valTransactions = document.getElementById("val-transactions");
-      const valAccounts = document.getElementById("val-accounts");
-      const valMoney = document.getElementById("val-money");
-      const descAccounts = document.getElementById("desc-accounts");
-
-      const graphLoading = document.getElementById("graph-loading");
-      const graphBadge = document.getElementById("graph-badge");
-      const alertsContainer = document.getElementById("alerts-container");
-
-      const detailDrawer = document.getElementById("detail-drawer");
-      const drawerOverlay = document.getElementById("drawer-overlay");
-      const btnCloseDrawer = document.getElementById("btn-close-drawer");
-
-      // ----------------------------------------------------------------------
-      // Safe String Sanitizer (Never insert untrusted API strings directly)
-      // ----------------------------------------------------------------------
-      function escapeHtml(str) {
-        if (str === null || str === undefined) return "";
-        return String(str)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#039;");
-      }
-
-      function formatCurrency(val) {
-        const num = Number(val);
-        if (isNaN(num)) return "$0.00";
-        return "$" + num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      }
-
-      function formatNumber(val) {
-        const num = Number(val);
-        if (isNaN(num)) return "0";
-        return num.toLocaleString("en-US");
-      }
-
-      // ----------------------------------------------------------------------
-      // API Communication Layer
-      // ----------------------------------------------------------------------
-      async function apiFetch(endpoint) {
-        const res = await fetch(`${API_BASE}${endpoint}`, {
-          headers: { "Accept": "application/json" }
-        });
-        if (!res.ok) {
-          const errorBody = await res.json().catch(() => ({ detail: res.statusText }));
-          throw new Error(errorBody.detail || `HTTP Error ${res.status}`);
-        }
-        return await res.json();
-      }
-
-      function setApiStatus(status, text) {
-        apiDot.className = "status-dot " + status;
-        apiStatusText.textContent = text;
-        if (status === "connected") {
-          errorBanner.classList.remove("visible");
-        }
-      }
-
-      function showApiError(msg) {
-        setApiStatus("error", "Offline");
-        errorBanner.classList.add("visible");
-        errorBannerText.textContent = "API Error: " + msg;
-      }
-
-      function updateTimestamp() {
-        const now = new Date();
-        lastUpdatedText.textContent = "Refreshed " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-      }
-
-      // ----------------------------------------------------------------------
-      // 1. Fetch & Populate Dashboard Metrics
-      // ----------------------------------------------------------------------
-      async function loadDashboardMetrics() {
-        try {
-          const data = await apiFetch(`/dashboard/summary?threshold=${DEFAULT_THRESHOLD}`);
-          const ds = data.dataset_summary || {};
-          const rs = data.risk_summary || {};
-
-          // Card 1: Transactions analysed
-          valTransactions.textContent = formatNumber(ds.total_transactions || 50000);
-
-          // Card 2: Accounts flagged (at calibrated threshold 0.20)
-          const flaggedCount = rs.suspicious_accounts_count !== undefined ? rs.suspicious_accounts_count : 59;
-          valAccounts.textContent = formatNumber(flaggedCount);
-          descAccounts.textContent = `TGNN score ≥ ${data.threshold_applied || 0.20} (calibrated cutoff)`;
-
-          // Card 3: Money at risk (volume in fraudulent flows)
-          const fraudVol = ds.fraud_volume !== undefined ? ds.fraud_volume : 3029456.92;
-          valMoney.textContent = formatCurrency(fraudVol);
-
-          setApiStatus("connected", "Connected");
-          updateTimestamp();
-        } catch (err) {
-          console.error("Dashboard metrics failed:", err);
-          showApiError("Failed to fetch dashboard metrics from " + API_BASE);
-          valTransactions.textContent = "—";
-          valAccounts.textContent = "—";
-          valMoney.textContent = "—";
-        }
-      }
-
-      // ----------------------------------------------------------------------
-      // 2. Fetch & Render Top 4 High-Priority Alerts
-      // ----------------------------------------------------------------------
-      async function loadHighPriorityAlerts() {
-        try {
-          // Strictly exactly four alerts per requirements
-          const data = await apiFetch(`/accounts/suspicious?threshold=${DEFAULT_THRESHOLD}&page_size=4`);
-          const accounts = data.accounts || [];
-
-          alertsContainer.innerHTML = "";
-          if (accounts.length === 0) {
-            alertsContainer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px;">No suspicious accounts detected at threshold ' + DEFAULT_THRESHOLD + '.</div>';
-            return;
-          }
-
-          accounts.forEach((acct) => {
-            const card = document.createElement("div");
-            card.className = "alert-card";
-            if (activeAccountId === acct.account_id) {
-              card.classList.add("selected");
-            }
-            card.setAttribute("role", "button");
-            card.setAttribute("tabindex", "0");
-            card.setAttribute("aria-label", `Account alert ${acct.account_id}`);
-
-            // Top row: ID + Score
-            const topRow = document.createElement("div");
-            topRow.className = "alert-top";
-
-            const idSpan = document.createElement("span");
-            idSpan.className = "alert-acct-id";
-            idSpan.textContent = acct.account_id;
-
-            const scoreBadge = document.createElement("span");
-            scoreBadge.className = "score-badge";
-            scoreBadge.textContent = "TGNN: " + Number(acct.tgnn_score).toFixed(4);
-
-            topRow.appendChild(idSpan);
-            topRow.appendChild(scoreBadge);
-
-            // Middle row: Type tag + true label indicator
-            const detailsRow = document.createElement("div");
-            detailsRow.className = "alert-details";
-
-            const typeSpan = document.createElement("span");
-            typeSpan.className = "alert-type-tag";
-            typeSpan.textContent = acct.account_type;
-
-            const labelNote = document.createElement("span");
-            labelNote.textContent = acct.rule_flagged ? "Rule Flagged" : "Graph Discovery Only";
-
-            detailsRow.appendChild(typeSpan);
-            detailsRow.appendChild(labelNote);
-
-            // Bottom row: Signal summary
-            const signalRow = document.createElement("div");
-            signalRow.className = "alert-signal";
-            const firstSig = (acct.signals_summary && acct.signals_summary[0]) || acct.top_signal_1 || "Temporal clustering";
-            signalRow.textContent = "Primary Signal: " + firstSig;
-
-            card.appendChild(topRow);
-            card.appendChild(detailsRow);
-            card.appendChild(signalRow);
-
-            // Click opens detail panel and focuses node in graph
-            card.addEventListener("click", () => {
-              openAccountDetail(acct.account_id);
-              focusNodeInGraph(acct.account_id);
-            });
-            card.addEventListener("keydown", (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                openAccountDetail(acct.account_id);
-                focusNodeInGraph(acct.account_id);
-              }
-            });
-
-            alertsContainer.appendChild(card);
-          });
-        } catch (err) {
-          console.error("Alerts load failed:", err);
-          alertsContainer.innerHTML = '<div style="padding:16px;text-align:center;color:var(--risk);font-size:11px;">Error loading alerts from backend.</div>';
-        }
-      }
-
-      // ----------------------------------------------------------------------
-      // 3. Initialize & Populate Cytoscape Network Graph
-      // ----------------------------------------------------------------------
-      async function loadTransactionGraph() {
-        graphLoading.classList.remove("hidden");
-        try {
-          const graphData = await apiFetch(`/graph?threshold=${DEFAULT_THRESHOLD}&max_nodes=50&max_edges=100`);
-          graphDataCache = graphData;
-
-          graphBadge.textContent = `${graphData.nodes_count} Accounts · ${graphData.edges_count} Transfers`;
-
-          // Format elements for Cytoscape
-          const elements = [];
-
-          (graphData.nodes || []).forEach((n) => {
-            elements.push({
-              group: "nodes",
-              data: {
-                id: n.id,
-                label: n.label,
-                is_flagged: Boolean(n.is_flagged),
-                score: n.tgnn_score,
-                type: n.account_type,
-                risk: n.risk_level,
-              }
-            });
-          });
-
-          (graphData.edges || []).forEach((e) => {
-            elements.push({
-              group: "edges",
-              data: {
-                id: e.id,
-                source: e.source,
-                target: e.target,
-                amount: e.amount,
-                is_fraud: Boolean(e.is_fraud),
-                tx_type: e.tx_type,
-                timestamp: e.timestamp,
-              }
-            });
-          });
-
-          if (!cyInstance) {
-            initCytoscape(elements);
-          } else {
-            cyInstance.elements().remove();
-            cyInstance.add(elements);
-            runGraphLayout();
-          }
-
-          graphLoading.classList.add("hidden");
-        } catch (err) {
-          console.error("Graph loading failed:", err);
-          graphLoading.classList.add("hidden");
-          graphBadge.textContent = "Error loading graph";
-          showApiError("Failed to fetch graph data from /api/graph.");
-        }
-      }
-
-      function initCytoscape(elements) {
-        cyInstance = cytoscape({
-          container: document.getElementById("cy-container"),
-          elements: elements,
-          style: [
-            // Normal / Unflagged Node
-            {
-              selector: "node",
-              style: {
-                "label": "data(label)",
-                "color": "#8B949E",
-                "font-size": "9px",
-                "font-family": "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
-                "font-weight": 500,
-                "text-valign": "bottom",
-                "text-margin-y": 4,
-                "background-color": "#4B5563",
-                "border-color": "#262C36",
-                "border-width": 1.5,
-                "width": 26,
-                "height": 26,
-                "transition-property": "background-color, border-color, border-width, width, height",
-                "transition-duration": "0.15s"
-              }
-            },
-            // Flagged for Review (Red Accent Exclusively: #F04438)
-            {
-              selector: "node[?is_flagged]",
-              style: {
-                "background-color": "#F04438",
-                "border-color": "#E6EDF3",
-                "border-width": 2,
-                "color": "#E6EDF3",
-                "font-weight": 700,
-                "font-size": "10px",
-                "width": 34,
-                "height": 34
-              }
-            },
-            // Focused / Selected Node
-            {
-              selector: "node:selected, node.focused",
-              style: {
-                "border-color": "#E6EDF3",
-                "border-width": 3,
-                "underlay-color": "#F04438",
-                "underlay-padding": 5,
-                "underlay-opacity": 0.3
-              }
-            },
-            // Standard Normal Edge (#30363D)
-            {
-              selector: "edge",
-              style: {
-                "curve-style": "bezier",
-                "target-arrow-shape": "triangle",
-                "arrow-scale": 0.8,
-                "line-color": "#30363D",
-                "target-arrow-color": "#30363D",
-                "width": 1.5,
-                "opacity": 0.8,
-                "transition-property": "line-color, width, opacity",
-                "transition-duration": "0.15s"
-              }
-            },
-            // Suspicious / Fraud Edge (Red Accent: #F04438)
-            {
-              selector: "edge[?is_fraud]",
-              style: {
-                "line-color": "#F04438",
-                "target-arrow-color": "#F04438",
-                "width": 2.5,
-                "opacity": 0.95
-              }
-            },
-            // Active Replay / Pulse Edge
-            {
-              selector: "edge.pulse-active",
-              style: {
-                "line-color": "#F04438",
-                "width": 4.5,
-                "opacity": 1.0,
-                "z-index": 10
-              }
-            }
-          ],
-          layout: {
-            name: "cose",
-            animate: false,
-            idealEdgeLength: 60,
-            nodeOverlap: 20,
-            refresh: 20,
-            fit: true,
-            padding: 24,
-            randomize: false,
-            componentSpacing: 60,
-            nodeRepulsion: 400000,
-            edgeElasticity: 100,
-            nestingFactor: 5,
-            gravity: 80,
-            numIter: 800,
-          },
-          wheelSensitivity: 0.25,
-        });
-
-        // Click on node: opens slide-in detail panel
-        cyInstance.on("tap", "node", function (evt) {
-          const node = evt.target;
-          const aid = node.id();
-          openAccountDetail(aid);
-          highlightConnectedEdges(node);
-        });
-
-        // Click on background: closes detail panel and deselects
-        cyInstance.on("tap", function (evt) {
-          if (evt.target === cyInstance) {
-            closeDetailDrawer();
-            cyInstance.elements().removeClass("focused pulse-active");
-          }
-        });
-      }
-
-      function runGraphLayout() {
-        if (!cyInstance) return;
-        const layout = cyInstance.layout({
-          name: "cose",
-          animate: true,
-          animationDuration: 400,
-          idealEdgeLength: 60,
-          nodeOverlap: 20,
-          fit: true,
-          padding: 24,
-          nodeRepulsion: 400000,
-          numIter: 500,
-        });
-        layout.run();
-      }
-
-      function focusNodeInGraph(nodeId) {
-        if (!cyInstance) return;
-        const node = cyInstance.getElementById(nodeId);
-        if (node.length > 0) {
-          cyInstance.elements().removeClass("focused");
-          node.addClass("focused");
-          cyInstance.animate({
-            center: { eles: node },
-            zoom: 1.6,
-          }, {
-            duration: 350
-          });
-          highlightConnectedEdges(node);
-        }
-      }
-
-      function highlightConnectedEdges(node) {
-        if (!cyInstance) return;
-        cyInstance.edges().removeClass("pulse-active");
-        node.connectedEdges().addClass("pulse-active");
-      }
-
-      // ----------------------------------------------------------------------
-      // 4. Slide-In Detail Panel Implementation
-      // ----------------------------------------------------------------------
-      async function openAccountDetail(accountId) {
-        activeAccountId = accountId;
-
-        // Highlight alert card if present
-        document.querySelectorAll(".alert-card").forEach((card) => {
-          const id = card.querySelector(".alert-acct-id");
-          if (id && id.textContent === accountId) {
-            card.classList.add("selected");
-          } else {
-            card.classList.remove("selected");
-          }
-        });
-
-        // Reset drawer fields to loading state
-        document.getElementById("drawer-acct-id").textContent = accountId;
-        document.getElementById("drawer-acct-type").textContent = "Fetching account details...";
-        document.getElementById("drawer-score").textContent = "—";
-        document.getElementById("drawer-risk-tier").textContent = "—";
-        document.getElementById("drawer-rule-flag").textContent = "—";
-        document.getElementById("drawer-recv").textContent = "—";
-        document.getElementById("drawer-sent").textContent = "—";
-        document.getElementById("drawer-net").textContent = "—";
-        document.getElementById("drawer-fraud-tx").textContent = "—";
-        document.getElementById("drawer-signals-list").innerHTML = '<div style="font-size:11px;color:var(--muted);">Loading signal explanations...</div>';
-        document.getElementById("drawer-tx-tbody").innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:12px;">Loading transaction history...</td></tr>';
-
-        // Open drawer
-        detailDrawer.classList.add("open");
-        drawerOverlay.classList.add("open");
-
-        try {
-          const detail = await apiFetch(`/accounts/${accountId}?threshold=${DEFAULT_THRESHOLD}`);
-          populateDrawer(detail);
-        } catch (err) {
-          console.error("Account detail failed:", err);
-          document.getElementById("drawer-acct-type").textContent = "Error loading account data.";
-        }
-      }
-
-      function populateDrawer(detail) {
-        document.getElementById("drawer-acct-id").textContent = detail.account_id;
-        document.getElementById("drawer-acct-type").textContent = `Account Type: ${detail.account_type.toUpperCase()} · Entity: ${detail.is_fraud_account ? "Synthetic Fraud Plant" : "Standard Account"}`;
-
-        const sc = detail.scoring || {};
-        document.getElementById("drawer-score").textContent = Number(sc.tgnn_score).toFixed(4);
-        document.getElementById("drawer-thresh").textContent = Number(sc.threshold_used).toFixed(2);
-        document.getElementById("drawer-risk-tier").textContent = sc.risk_level || "UNKNOWN";
-        document.getElementById("drawer-rule-flag").textContent = sc.rule_flagged ? "Flagged (Static Rules)" : "Unflagged (Passed Static Rules)";
-
-        const st = detail.statistics || {};
-        document.getElementById("drawer-recv").textContent = formatCurrency(st.total_received_amount) + ` (${st.total_received_count} tx)`;
-        document.getElementById("drawer-sent").textContent = formatCurrency(st.total_sent_amount) + ` (${st.total_sent_count} tx)`;
-        document.getElementById("drawer-net").textContent = formatCurrency(st.net_flow_amount);
-        document.getElementById("drawer-fraud-tx").textContent = st.fraud_transactions_involved + " transactions";
-
-        // Signals List
-        const inv = detail.investigation || {};
-        const signalsListContainer = document.getElementById("drawer-signals-list");
-        signalsListContainer.innerHTML = "";
-
-        const signalsDetail = inv.signals_detail || [];
-        if (signalsDetail.length === 0) {
-          signalsListContainer.innerHTML = '<div style="font-size:11px;color:var(--muted);">No dominant fraud signals triggered.</div>';
-        } else {
-          signalsDetail.forEach((sig) => {
-            const card = document.createElement("div");
-            card.className = "signal-card";
-
-            const head = document.createElement("div");
-            head.className = "signal-head";
-            const titleSpan = document.createElement("span");
-            titleSpan.textContent = sig.title || sig.name;
-            const badge = document.createElement("span");
-            badge.className = "signal-badge";
-            badge.textContent = sig.severity || "FLAG";
-
-            head.appendChild(titleSpan);
-            head.appendChild(badge);
-
-            const body = document.createElement("div");
-            body.className = "signal-body";
-            body.textContent = sig.description || "";
-
-            const action = document.createElement("div");
-            action.className = "signal-action";
-            action.textContent = "Recommended Action: " + (sig.recommended_action || "Manual inspection.");
-
-            card.appendChild(head);
-            card.appendChild(body);
-            card.appendChild(action);
-            signalsListContainer.appendChild(card);
-          });
-        }
-
-        // Recent Transaction Timeline
-        const tbody = document.getElementById("drawer-tx-tbody");
-        tbody.innerHTML = "";
-        const txs = detail.recent_transactions || [];
-
-        if (txs.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:12px;">No transactions recorded.</td></tr>';
-        } else {
-          txs.forEach((tx) => {
-            const tr = document.createElement("tr");
-            if (tx.is_fraud) {
-              tr.className = "fraud-row";
-            }
-
-            const counterparty = (tx.sender_id === detail.account_id) ? `→ ${tx.receiver_id}` : `← ${tx.sender_id}`;
-            const timeFormatted = tx.timestamp ? tx.timestamp.substring(11, 19) : "—";
-
-            tr.innerHTML = `
-              <td>${escapeHtml(timeFormatted)}</td>
-              <td style="font-family:ui-monospace,monospace;">${escapeHtml(counterparty)}</td>
-              <td>${escapeHtml(formatCurrency(tx.amount))}</td>
-              <td>${escapeHtml(tx.tx_type.replace('_', ' '))}</td>
-            `;
-            tbody.appendChild(tr);
-          });
-        }
-      }
-
-      function closeDetailDrawer() {
-        detailDrawer.classList.remove("open");
-        drawerOverlay.classList.remove("open");
-        activeAccountId = null;
-        document.querySelectorAll(".alert-card").forEach((c) => c.classList.remove("selected"));
-      }
-
-      // ----------------------------------------------------------------------
-      // 5. Simulation Demo Replay (Safe, honest sequential replay of existing data)
-      // ----------------------------------------------------------------------
-      function startSimulationReplay() {
-        if (!cyInstance || !graphDataCache || !graphDataCache.edges || graphDataCache.edges.length === 0) {
-          alert("Graph data not ready for simulation replay.");
-          return;
-        }
-
-        isSimulating = true;
-        btnSimulation.textContent = "Replaying Demo...";
-        btnSimulation.classList.add("btn-sim-active");
-        simBanner.classList.add("active");
-
-        // Sort existing graph edges chronologically
-        const edges = [...graphDataCache.edges].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-        let step = 0;
-
-        // Reset highlight
-        cyInstance.elements().removeClass("pulse-active focused");
-
-        simTimer = setInterval(() => {
-          if (step >= edges.length || !isSimulating) {
-            stopSimulationReplay();
-            return;
-          }
-
-          const currentEdge = edges[step];
-          const cyEdge = cyInstance.getElementById(currentEdge.id);
-
-          // Update banner
-          simBannerText.textContent = `Synthetic Replay [${step + 1}/${edges.length}] · ${currentEdge.timestamp.substring(11, 19)}: ${currentEdge.source} → ${currentEdge.target} ($${currentEdge.amount}) [${currentEdge.is_fraud ? "FLAGGED FRAUD" : "Normal"}]`;
-
-          // Clear previous pulse, light up current transaction
-          cyInstance.edges().removeClass("pulse-active");
-          if (cyEdge.length > 0) cyEdge.addClass("pulse-active");
-
-          step++;
-        }, 300);
-      }
-
-      function stopSimulationReplay() {
-        isSimulating = false;
-        clearInterval(simTimer);
-        simTimer = null;
-        btnSimulation.textContent = "Start simulation";
-        btnSimulation.classList.remove("btn-sim-active");
-        simBanner.classList.remove("active");
-        if (cyInstance) {
-          cyInstance.edges().removeClass("pulse-active");
-        }
-      }
-
-      // ----------------------------------------------------------------------
-      // Event Listeners & Controls
-      // ----------------------------------------------------------------------
-      btnRefresh.addEventListener("click", () => {
-        loadDashboardMetrics();
-        loadHighPriorityAlerts();
-        loadTransactionGraph();
-      });
-
-      btnRetry.addEventListener("click", () => {
-        errorBanner.classList.remove("visible");
-        loadDashboardMetrics();
-        loadHighPriorityAlerts();
-        loadTransactionGraph();
-      });
-
-      btnSimulation.addEventListener("click", () => {
-        if (isSimulating) {
-          stopSimulationReplay();
-        } else {
-          startSimulationReplay();
-        }
-      });
-
-      btnStopSim.addEventListener("click", stopSimulationReplay);
-
-      // Graph Controls
-      document.getElementById("btn-zoom-in").addEventListener("click", () => {
-        if (cyInstance) cyInstance.zoom(cyInstance.zoom() * 1.25);
-      });
-      document.getElementById("btn-zoom-out").addEventListener("click", () => {
-        if (cyInstance) cyInstance.zoom(cyInstance.zoom() * 0.8);
-      });
-      document.getElementById("btn-fit").addEventListener("click", () => {
-        if (cyInstance) cyInstance.fit(null, 24);
-      });
-      document.getElementById("btn-relayout").addEventListener("click", runGraphLayout);
-
-      // Drawer Controls
-      btnCloseDrawer.addEventListener("click", closeDetailDrawer);
-      drawerOverlay.addEventListener("click", closeDetailDrawer);
-      window.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && detailDrawer.classList.contains("open")) {
-          closeDetailDrawer();
-        }
-      });
-
-      // ----------------------------------------------------------------------
-      // Initialization
-      // ----------------------------------------------------------------------
-      async function initApp() {
-        await loadDashboardMetrics();
-        await loadHighPriorityAlerts();
-        await loadTransactionGraph();
-
-        // Background metric & alert refresh
-        setInterval(() => {
-          if (!isSimulating) {
-            loadDashboardMetrics();
-            loadHighPriorityAlerts();
-          }
-        }, AUTO_REFRESH_INTERVAL_MS);
-      }
-
-      window.addEventListener("DOMContentLoaded", initApp);
-    })();
-  </script>
+  <!-- MAIN -->
+  <main class="main">
+    <header class="mhdr">
+      <div class="hl">
+        <h1 class="pg-title">PulseGuard<span class="ta">-Z</span></h1>
+        <span class="pg-sub">TEMPORAL GRAPH NEURAL NETWORK // FLASH FRAUD DETECTION</span>
+      </div>
+      <div class="hr">
+        <div class="thresh-box">
+          <span class="tl">Threshold &tau;: <span class="tv" id="thresh-disp">0.81</span></span>
+          <input type="range" id="thresh-range" class="thresh-slider" min="0.05" max="0.99" step="0.01" value="0.81" aria-label="Decision threshold">
+          <div class="pg">
+            <button class="bp active" id="preset-opt">0.81 (B2)</button>
+            <button class="bp" id="preset-broad">0.60</button>
+            <button class="bp" id="preset-strict">0.90</button>
+          </div>
+        </div>
+        <button class="bact bsim" id="btn-sim"><svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg><span id="sim-txt">Start simulation</span></button>
+        <button class="bact" id="btn-refresh"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>Refresh</span></button>
+        <div class="spill"><span class="pdot"></span><span id="api-txt">ONLINE</span></div>
+      </div>
+    </header>
+
+    <div class="dbody">
+      <!-- 3 METRIC CARDS -->
+      <section class="mrow" aria-label="Key metrics">
+        <div class="mcard">
+          <div class="mi">
+            <span class="ml">Transactions Analysed</span>
+            <span class="mv" id="val-tx">50,000</span>
+            <span class="ms">144 Time Windows &middot; G2P Transfers</span>
+          </div>
+          <div class="mic"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+        </div>
+        <div class="mcard">
+          <div class="mi">
+            <span class="ml">Accounts Flagged</span>
+            <span class="mv rv" id="val-acct">82</span>
+            <span class="ms" id="desc-acct">&tau; = 0.81 &middot; Compliance Priority</span>
+          </div>
+          <div class="mic ri"><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+        </div>
+        <div class="mcard">
+          <div class="mi">
+            <span class="ml">Money at Risk</span>
+            <span class="mv" id="val-money">&#8377;30,29,456.92</span>
+            <span class="ms">0.60% of G2P Welfare Outlays</span>
+          </div>
+          <div class="mic"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+        </div>
+      </section>
+
+      <!-- CENTER + RIGHT PANEL -->
+      <div class="wrow">
+        <div class="csec">
+          <!-- GRAPH CARD -->
+          <div class="gcrd">
+            <div class="phdr">
+              <div class="ptit">
+                <span class="tdot"></span>
+                <span>Transaction Topology &amp; Kill Chain Graph</span>
+                <span style="font-family:var(--font-mono);font-size:10px;color:var(--em-bright);margin-left:8px;" id="graph-badge">Loading...</span>
+              </div>
+              <div class="gtools">
+                <button class="btool" id="btn-zi">+</button>
+                <button class="btool" id="btn-zo">&minus;</button>
+                <button class="btool" id="btn-fit">&#x26F6;</button>
+                <button class="btool" id="btn-rl">&#x21BB;</button>
+              </div>
+            </div>
+            <div id="cy">
+              <div class="glo" id="glo"><div class="spin"></div><div style="font-size:11px;color:var(--em-bright);">Loading graph...</div></div>
+            </div>
+            <div class="sim-ban" id="sim-ban"><span id="sim-ban-txt">Replaying...</span><button class="bp" id="btn-stopsim" style="background:var(--risk-bg);color:var(--risk-bright);border-color:var(--risk-border);">Stop</button></div>
+            <div class="gleg">
+              <div class="lchip"><span class="lg govt"></span><span>Government</span></div>
+              <div class="lchip"><span class="lg merch"></span><span>Merchant</span></div>
+              <div class="lchip"><span class="lg agent"></span><span>Agent</span></div>
+              <div class="lchip"><span class="lg benef"></span><span>Beneficiary</span></div>
+              <div class="lchip"><span class="lg mule"></span><span style="color:var(--risk-bright);font-weight:600;">Mule &ge; <span id="leg-tv">0.81</span></span></div>
+            </div>
+            <div class="ntip" id="ntip"></div>
+          </div>
+          <!-- ALERTS STRIP (4 cards) -->
+          <div class="astrip">
+            <div class="ahdr">
+              <div class="atit"><span style="color:var(--risk-bright);">&#x25CF;</span><span>Priority Fraud Alerts</span><span style="font-size:9.5px;color:var(--text-muted);font-weight:normal;">(Top 4 by TGNN Score)</span></div>
+              <span style="font-size:10px;font-family:var(--font-mono);color:var(--text-muted);">Click to inspect</span>
+            </div>
+            <div class="agrid" id="alerts-grid"><div style="grid-column:1/-1;text-align:center;color:var(--text-muted);font-size:11px;padding:12px;">Loading alerts...</div></div>
+          </div>
+        </div>
+
+        <!-- INVESTIGATION PANEL -->
+        <aside class="inv">
+          <div class="invhdr">
+            <div class="invtit"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>Account Investigation</span></div>
+            <button class="bclr" id="btn-clr">&times; Clear</button>
+          </div>
+          <!-- EMPTY STATE -->
+          <div class="iempty" id="inv-empty">
+            <div class="eico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><line x1="12" y1="2" x2="12" y2="12"/></svg></div>
+            <div class="ehdg">Select a Node</div>
+            <div class="edesc">Click any account in the graph or select a priority alert to inspect its TGNN risk profile, AML signals, and transaction timeline.</div>
+            <div class="ehint">&#x2605; Red nodes = flagged mule accounts &ge; &tau;</div>
+          </div>
+          <!-- POPULATED DETAILS -->
+          <div class="idet" id="inv-det">
+            <div class="ame">
+              <div class="aidr">
+                <span class="acid" id="i-id">ACC000000</span>
+                <span class="sbadge fraud" id="i-badge">FLAGGED</span>
+              </div>
+              <div class="actype" id="i-type">Loading...</div>
+            </div>
+            <div>
+              <div class="stit">Model Scoring</div>
+              <div class="sgrid">
+                <div class="scl"><span class="scll">TGNN Risk Score</span><span class="sclv red" id="i-tgnn">—</span></div>
+                <div class="scl"><span class="scll">Threshold (&tau;)</span><span class="sclv green" id="i-thresh">0.81</span></div>
+                <div class="scl"><span class="scll">Logistic Reg.</span><span class="sclv" id="i-lr">N/A</span></div>
+                <div class="scl"><span class="scll">Hybrid Model</span><span class="sclv" id="i-hybrid">N/A</span></div>
+                <div class="scl"><span class="scll">Risk Assessment</span><span class="sclv" id="i-risk">—</span></div>
+                <div class="scl"><span class="scll">Rule Baseline</span><span class="sclv" id="i-rule">—</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="stit">Transactional Volumes (INR)</div>
+              <div class="fgrid">
+                <div class="scl"><span class="scll">Received</span><span class="sclv green" id="i-recv">—</span></div>
+                <div class="scl"><span class="scll">Sent</span><span class="sclv" id="i-sent">—</span></div>
+                <div class="scl"><span class="scll">Net Flow</span><span class="sclv" id="i-net">—</span></div>
+                <div class="scl"><span class="scll">Fraud Tx</span><span class="sclv red" id="i-ftx">—</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="stit">Graph Signals &amp; AML Typologies</div>
+              <div class="sigl" id="i-sigs"></div>
+            </div>
+            <div>
+              <div class="stit">Recent Activity Timeline</div>
+              <table class="tlt">
+                <thead><tr><th>Time</th><th>Counterparty</th><th>Amount</th><th>Type</th></tr></thead>
+                <tbody id="i-txb"></tbody>
+              </table>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="lovo" id="lov"><div class="spin"></div><div style="font-size:12px;font-weight:600;color:var(--text-white);">Loading PulseGuard-Z...</div></div>
+<div class="errb" id="errb"><span id="err-txt">API Disconnected</span><button class="bp" id="btn-retry" style="background:var(--risk-bg);color:var(--risk-bright);border-color:var(--risk-border);">Retry</button></div>
+
+<script>
+(function(){
+"use strict";
+const API=window.location.origin.includes("http")?`${window.location.origin}/api`:"http://127.0.0.1:8000/api";
+let thresh=0.81,cy=null,simming=false,simTmr=null,gdata=null,activeId=null;
+const E=(id)=>document.getElementById(id);
+const lov=E("lov"),errb=E("errb"),errtxt=E("err-txt"),lov2=E("glo");
+const simBan=E("sim-ban"),simTxt=E("sim-ban-txt"),btnSim=E("btn-sim"),simTxtBtn=E("sim-txt");
+const thRange=E("thresh-range"),thDisp=E("thresh-disp"),legTv=E("leg-tv");
+const pOpt=E("preset-opt"),pBroad=E("preset-broad"),pStrict=E("preset-strict");
+const ntip=E("ntip"),alertsGrid=E("alerts-grid"),gbadge=E("graph-badge");
+const invEmpty=E("inv-empty"),invDet=E("inv-det"),btnClr=E("btn-clr");
+
+function esc(s){if(s===null||s===undefined)return"";return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function inr(v){const n=Number(v);if(isNaN(n))return"₹0.00";return"₹"+n.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fnum(v){const n=Number(v);if(isNaN(n))return"0";return n.toLocaleString("en-IN");}
+async function api(ep){const r=await fetch(`${API}${ep}`,{headers:{"Accept":"application/json"}});if(!r.ok){const e=await r.json().catch(()=>({detail:r.statusText}));throw new Error(e.detail||`HTTP ${r.status}`);}return r.json();}
+function showErr(m){errb.classList.add("visible");errtxt.textContent="API Error: "+m;}
+function hideErr(){errb.classList.remove("visible");}
+
+async function loadMetrics(){
+  try{
+    const d=await api(`/dashboard/summary?threshold=${thresh}`);
+    const ds=d.dataset_summary||{},rs=d.risk_summary||{};
+    E("val-tx").textContent=fnum(ds.total_transactions||50000);
+    const fc=rs.suspicious_accounts_count!==undefined?rs.suspicious_accounts_count:82;
+    E("val-acct").textContent=fnum(fc);
+    E("nav-badge-mules").textContent=fnum(fc);
+    E("desc-acct").textContent=`τ = ${thresh.toFixed(2)} · Compliance Priority`;
+    const fv=ds.fraud_volume!==undefined?ds.fraud_volume:3029456.92;
+    E("val-money").textContent=inr(fv);
+    hideErr();
+  }catch(err){console.error(err);showErr("Failed to fetch metrics");E("val-tx").textContent="50,000";E("val-acct").textContent="82";E("val-money").textContent="₹30,29,456.92";}
+}
+
+async function loadAlerts(){
+  try{
+    const d=await api(`/accounts/suspicious?threshold=${thresh}&page_size=4`);
+    const accts=d.accounts||[];
+    alertsGrid.innerHTML="";
+    if(!accts.length){alertsGrid.innerHTML=`<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);font-size:11px;padding:12px;">No accounts flagged at τ = ${thresh.toFixed(2)}.</div>`;return;}
+    accts.forEach(a=>{
+      const c=document.createElement("div");
+      c.className="acrd"+(activeId===a.account_id?" selected":"");
+      c.setAttribute("role","button");c.setAttribute("tabindex","0");
+      const sig=(a.signals_summary&&a.signals_summary[0])||a.top_signal_1||"Temporal pass-through velocity";
+      c.innerHTML=`<div class="atop"><span class="aid">${esc(a.account_id)}</span><span class="ascore">TGNN ${Number(a.tgnn_score).toFixed(4)}</span></div><div class="asig">${esc(sig)}</div><div class="afoot"><span>${esc(a.account_type)}</span><span class="rt">${esc(a.risk_level||"CRITICAL")}</span></div>`;
+      const act=()=>{selectAccount(a.account_id);focusNode(a.account_id);};
+      c.addEventListener("click",act);
+      c.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();act();}});
+      alertsGrid.appendChild(c);
+    });
+  }catch(err){console.error(err);alertsGrid.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--risk-bright);font-size:11px;padding:12px;">Error loading alerts.</div>';}
+}
+
+async function loadGraph(){
+  lov2&&lov2.classList.remove("hidden");
+  try{
+    const gd=await api(`/graph?threshold=${thresh}&max_nodes=50&max_edges=100`);
+    gdata=gd;
+    gbadge.textContent=`${gd.nodes_count} Nodes · ${gd.edges_count} Transfers`;
+    const els=[];
+    (gd.nodes||[]).forEach(n=>els.push({group:"nodes",data:{id:n.id,label:n.label,is_flagged:Boolean(n.is_flagged),score:n.tgnn_score,type:n.account_type,risk:n.risk_level}}));
+    (gd.edges||[]).forEach(e=>els.push({group:"edges",data:{id:e.id,source:e.source,target:e.target,amount:e.amount,is_fraud:Boolean(e.is_fraud),timestamp:e.timestamp,tx_type:e.tx_type}}));
+    if(!cy){initCy(els);}else{cy.elements().remove();cy.add(els);runLayout();}
+    if(activeId&&cy)focusNode(activeId);
+  }catch(err){console.error(err);gbadge.textContent="Graph Error";}
+  finally{lov2&&lov2.classList.add("hidden");}
+}
+
+function initCy(els){
+  cy=cytoscape({
+    container:E("cy"),elements:els,boxSelectionEnabled:false,autounselectify:false,
+    style:[
+      {selector:"node",style:{"label":"data(id)","color":"#94a3b8","font-size":"9px","font-family":"JetBrains Mono,monospace","text-valign":"bottom","text-margin-y":4,"background-color":"#4b5563","width":18,"height":18,"border-width":1.5,"border-color":"#64748b","transition-property":"background-color,border-color,width,height","transition-duration":"0.2s"}},
+      {selector:'node[type="government"]',style:{"shape":"triangle","background-color":"#059669","border-color":"#34d399","border-width":2,"width":24,"height":24,"color":"#34d399","font-weight":"bold"}},
+      {selector:'node[type="merchant"]',style:{"shape":"round-rectangle","background-color":"#0284c7","border-color":"#38bdf8","width":20,"height":20}},
+      {selector:'node[type="agent"]',style:{"shape":"pentagon","background-color":"#d97706","border-color":"#fbbf24","width":20,"height":20}},
+      {selector:"node[?is_flagged]",style:{"shape":"ellipse","background-color":"#ef4444","border-color":"#fecaca","border-width":2.5,"width":24,"height":24,"color":"#f87171","font-weight":"bold","shadow-blur":12,"shadow-color":"rgba(239,68,68,0.6)","shadow-opacity":0.9}},
+      {selector:"node:selected,node.focused",style:{"border-color":"#00ff88","border-width":3.5,"width":30,"height":30,"color":"#00ff88","font-weight":"bold","shadow-blur":18,"shadow-color":"#00ff88","shadow-opacity":1.0}},
+      {selector:"edge",style:{"width":1.4,"line-color":"#1e3a2b","target-arrow-color":"#1e3a2b","target-arrow-shape":"triangle","arrow-scale":0.8,"curve-style":"bezier","opacity":0.65}},
+      {selector:"edge[?is_fraud]",style:{"width":2.2,"line-color":"#ef4444","target-arrow-color":"#ef4444","arrow-scale":1.0,"opacity":0.9,"line-style":"dashed","line-dash-pattern":[5,3]}},
+      {selector:"edge.pa",style:{"width":3.5,"line-color":"#00ff88","target-arrow-color":"#00ff88","opacity":1.0,"shadow-blur":12,"shadow-color":"#00ff88"}}
+    ]
+  });
+  cy.on("tap","node",evt=>selectAccount(evt.target.id()));
+  cy.on("tap",evt=>{if(evt.target===cy)clearSel();});
+  cy.on("mouseover","node",evt=>{
+    const n=evt.target,p=evt.renderedPosition,d=n.data();
+    ntip.style.display="block";ntip.style.left=(p.x+16)+"px";ntip.style.top=(p.y-12)+"px";
+    ntip.innerHTML=`<div style="font-weight:700;font-family:var(--font-mono);color:${d.is_flagged?"var(--risk-bright)":"var(--em-neon)"};">${esc(d.id)}</div><div style="color:var(--text-muted);font-size:10px;">Type: ${esc(d.type)}</div><div style="margin-top:2px;font-size:10px;">TGNN: <strong>${Number(d.score).toFixed(4)}</strong></div><div style="color:${d.is_flagged?"var(--risk-bright)":"var(--em-bright)"};font-size:9.5px;font-weight:600;">${d.is_flagged?"⚠ FLAGGED MULE":"✓ Standard Node"}</div>`;
+  });
+  cy.on("mouseout","node",()=>{ntip.style.display="none";});
+  runLayout();
+}
+
+function runLayout(){
+  if(!cy)return;
+  cy.layout({name:"cose",animate:true,animationDuration:600,randomize:false,componentSpacing:60,nodeOverlap:20,idealEdgeLength:60,edgeElasticity:100,nestingFactor:5,gravity:80,numIter:300,initialTemp:200,coolingFactor:0.95,fit:true,padding:24}).run();
+}
+
+function focusNode(id){
+  if(!cy)return;cy.nodes().removeClass("focused");
+  const n=cy.getElementById(id);
+  if(n.length>0){n.addClass("focused");cy.animate({center:{eles:n},zoom:Math.max(cy.zoom(),1.4),duration:400});}
+}
+
+async function selectAccount(id){
+  if(!id)return;activeId=id;
+  invEmpty.style.display="none";invDet.classList.add("visible");btnClr.classList.add("show");
+  document.querySelectorAll(".acrd").forEach(c=>c.classList.toggle("selected",c.querySelector(".aid")?.textContent===id));
+  E("i-id").textContent=id;E("i-type").textContent="Loading...";
+  try{const d=await api(`/accounts/${id}?threshold=${thresh}`);populate(d);}
+  catch(err){console.error(err);E("i-type").textContent="Failed to load profile.";}
+}
+
+function populate(d){
+  E("i-id").textContent=d.account_id;
+  E("i-type").textContent=`Type: ${d.account_type.toUpperCase()} · ${d.is_fraud_account?"Confirmed Ground-Truth Fraud":"Standard Entity"}`;
+  const isMule=(d.scoring&&d.scoring.is_suspicious)||d.is_fraud_account;
+  const sb=E("i-badge");sb.className="sbadge "+(isMule?"fraud":"normal");sb.textContent=isMule?"FLAGGED MULE":"NORMAL ENTITY";
+  const sc=d.scoring||{};
+  E("i-tgnn").textContent=sc.tgnn_score!=null?Number(sc.tgnn_score).toFixed(4):"—";
+  E("i-thresh").textContent=sc.threshold_used!=null?Number(sc.threshold_used).toFixed(2):thresh.toFixed(2);
+  const lr=sc.lr_score!=null?sc.lr_score:(d.lr_score!=null?d.lr_score:null);
+  const hy=sc.hybrid_score!=null?sc.hybrid_score:(d.hybrid_score!=null?d.hybrid_score:null);
+  E("i-lr").textContent=lr!==null?Number(lr).toFixed(4):"N/A (Not in API)";
+  E("i-hybrid").textContent=hy!==null?Number(hy).toFixed(4):"N/A (Not in API)";
+  E("i-risk").textContent=sc.risk_level||"UNKNOWN";
+  E("i-rule").textContent=sc.rule_flagged?"Flagged (Static Rules)":"Passed (Graph Only)";
+  const st=d.statistics||{};
+  E("i-recv").textContent=inr(st.total_received_amount)+` (${st.total_received_count||0} tx)`;
+  E("i-sent").textContent=inr(st.total_sent_amount)+` (${st.total_sent_count||0} tx)`;
+  E("i-net").textContent=inr(st.net_flow_amount);
+  E("i-ftx").textContent=(st.fraud_transactions_involved||0)+" transactions";
+  const inv=d.investigation||{},sc2=E("i-sigs");
+  sc2.innerHTML="";
+  const sigs=inv.signals_detail||[];
+  if(!sigs.length){sc2.innerHTML='<div style="font-size:11px;color:var(--text-muted);">No high-risk AML typologies triggered.</div>';}
+  else sigs.forEach(s=>{const c=document.createElement("div");c.className="sigc "+(s.severity==="CRITICAL"?"crit":"med");c.innerHTML=`<div class="sigh"><span>${esc(s.title||s.name)}</span><span class="sigt ${esc(s.severity||"FLAG")}">${esc(s.severity||"FLAG")}</span></div><div class="sigb">${esc(s.description||"")}</div><div class="siga">Action: ${esc(s.recommended_action||"Inspect account transactions.")}</div>`;sc2.appendChild(c);});
+  const tb=E("i-txb");tb.innerHTML="";
+  const txs=d.recent_transactions||[];
+  if(!txs.length){tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:10px;">No records.</td></tr>';}
+  else txs.forEach(tx=>{const tr=document.createElement("tr");if(tx.is_fraud)tr.className="fr";const ts=tx.timestamp?tx.timestamp.substring(11,19):"—";const cp=tx.sender_id===d.account_id?`→ ${tx.receiver_id}`:`← ${tx.sender_id}`;tr.innerHTML=`<td>${esc(ts)}</td><td style="font-family:var(--font-mono);font-weight:600;">${esc(cp)}</td><td style="font-weight:600;">${esc(inr(tx.amount))}</td><td>${esc(tx.tx_type.replace(/_/g," "))}</td>`;tb.appendChild(tr);});
+}
+
+function clearSel(){
+  activeId=null;invDet.classList.remove("visible");invEmpty.style.display="flex";btnClr.classList.remove("show");
+  if(cy)cy.nodes().removeClass("focused");
+  document.querySelectorAll(".acrd").forEach(c=>c.classList.remove("selected"));
+}
+
+function startSim(){
+  if(!cy||!gdata||!gdata.edges||!gdata.edges.length){alert("Graph not ready.");return;}
+  simming=true;simTxtBtn.textContent="Replaying...";btnSim.classList.add("simulating");simBan.classList.add("active");
+  const edges=[...gdata.edges].sort((a,b)=>a.timestamp.localeCompare(b.timestamp));
+  let step=0;cy.elements().removeClass("pa focused");
+  simTmr=setInterval(()=>{
+    if(step>=edges.length||!simming){stopSim();return;}
+    const ce=edges[step],ce2=cy.getElementById(ce.id);
+    simTxt.textContent=`Replay [${step+1}/${edges.length}] · ${ce.timestamp.substring(11,19)}: ${ce.source} → ${ce.target} (${inr(ce.amount)}) [${ce.is_fraud?"FLAGGED":"Normal"}]`;
+    cy.edges().removeClass("pa");if(ce2.length>0)ce2.addClass("pa");step++;
+  },320);
+}
+
+function stopSim(){
+  simming=false;clearInterval(simTmr);simTmr=null;simTxtBtn.textContent="Start simulation";btnSim.classList.remove("simulating");simBan.classList.remove("active");
+  if(cy)cy.edges().removeClass("pa");
+}
+
+function applyThresh(v){
+  thresh=Math.max(0.05,Math.min(0.99,Number(v)));
+  thRange.value=thresh.toFixed(2);thDisp.textContent=thresh.toFixed(2);legTv.textContent=thresh.toFixed(2);
+  [pOpt,pBroad,pStrict].forEach(b=>b.classList.remove("active"));
+  if(Math.abs(thresh-0.81)<0.005)pOpt.classList.add("active");
+  else if(Math.abs(thresh-0.60)<0.005)pBroad.classList.add("active");
+  else if(Math.abs(thresh-0.90)<0.005)pStrict.classList.add("active");
+  loadMetrics();loadAlerts();loadGraph();
+}
+
+thRange.addEventListener("input",e=>thDisp.textContent=Number(e.target.value).toFixed(2));
+thRange.addEventListener("change",e=>applyThresh(e.target.value));
+pOpt.addEventListener("click",()=>applyThresh(0.81));
+pBroad.addEventListener("click",()=>applyThresh(0.60));
+pStrict.addEventListener("click",()=>applyThresh(0.90));
+E("btn-refresh").addEventListener("click",()=>{loadMetrics();loadAlerts();loadGraph();});
+E("btn-retry").addEventListener("click",()=>{hideErr();loadMetrics();loadAlerts();loadGraph();});
+btnSim.addEventListener("click",()=>{if(simming)stopSim();else startSim();});
+E("btn-stopsim").addEventListener("click",stopSim);
+btnClr.addEventListener("click",clearSel);
+E("btn-zi").addEventListener("click",()=>{if(cy)cy.zoom(cy.zoom()*1.25);});
+E("btn-zo").addEventListener("click",()=>{if(cy)cy.zoom(cy.zoom()*0.8);});
+E("btn-fit").addEventListener("click",()=>{if(cy)cy.fit(null,24);});
+E("btn-rl").addEventListener("click",runLayout);
+
+window.addEventListener("DOMContentLoaded",()=>{
+  applyThresh(0.81);
+  setTimeout(()=>lov.classList.add("hidden"),400);
+  setInterval(()=>{if(!simming){loadMetrics();loadAlerts();}},30000);
+});
+})();
+</script>
 </body>
 </html>
