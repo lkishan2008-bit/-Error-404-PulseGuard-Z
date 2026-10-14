@@ -1,4 +1,4 @@
-# PulseGuard-Z — Phase 2 Evaluation Results
+# PulseGuard-Z — Phase 2 Evaluation Results (v2 Dataset)
 **IBM Z Hackathon | SSF2026 | Team: Error-404**
 
 ---
@@ -9,9 +9,11 @@
 |--------|-------|
 | Total accounts | 2,000 |
 | Total transactions | 50,000 |
-| Fraud transactions | 1,500 (3.00%) |
-| Simulation period | 2026-10-01 00:00:02 → 2026-10-03 23:59:33 |
-| Test-period fraud accounts | 7 |
+| Fraud transactions | 1,800 (3.60%) |
+| Simulation period | 2026-10-01 00:00:28 → 2026-10-03 23:59:53 |
+| Train-period fraud accounts | 319 |
+| Val-period fraud accounts | 20 |
+| Test-period fraud accounts | 102 |
 
 ## Model Configuration
 
@@ -19,77 +21,118 @@
 |-----------|-------|
 | Snapshot window | 30 minutes |
 | GRU look-back | 6 snapshots (3 hours) |
-| Node features | 8 |
+| Node features total | 12 (8 behavioural + 4 account-type one-hot) |
 | GCN layers × hidden | 2 × 32 |
 | GRU hidden | 64 |
 | Dropout | 0.30 |
 | Train / Val / Test split | 70 / 15 / 15 % (chronological) |
-| Weighted BCE pos_weight | ~27.9 |
-| Best validation loss | 0.0242 |
+| Weighted BCE pos_weight | ~21.9 |
+| Best validation loss | 0.0814 |
+| LR regularisation C | 0.1 |
 
 ---
 
-## Test-Set Metrics (Default threshold = 0.50)
+## Threshold Selection (Validation Set)
 
-| Model | Precision | Recall | F1 | ROC-AUC | Accuracy |
-|-------|-----------|--------|----|---------|----------|
-| **TGNN** | 0.0000 | 0.0000 | 0.0000 | **0.8466** | 0.9965 |
-| Rule Baseline | 0.0645 | 0.2857 | 0.1053 | 0.6356 | 0.9830 |
+Thresholds chosen by maximising F1 on validation data. Test set evaluated once.
 
----
-
-## Operating Threshold Analysis (Calibrated for 99.65% Class Imbalance)
-
-Because the true test prior is only 7 fraud accounts out of 2,000 (0.35%), uncalibrated model probabilities naturally peak around ~0.29. Evaluating at calibrated decision thresholds demonstrates the TGNN's ranking power:
-
-| Threshold | Flagged Accounts | Precision | Recall | F1 | Notes |
-|-----------|------------------|-----------|--------|----|-------|
-| **0.50 (Standard)** | 0 | 0.0000 | 0.0000 | 0.0000 | Conservative; zero false alarms |
-| **0.23 (Calibrated)** | 38 | 0.1053 | 0.5714 | **0.1778** | Outperforms Rule Baseline F1 (0.1053) |
-| **0.20 (High-Recall)** | 59 | 0.0678 | 0.5714 | 0.1212 | Balanced operational alert queue |
-| **0.05 (Broad Sweep)**| 198 | 0.0202 | 0.5714 | 0.0390 | Early-stage investigation screening |
+| Model | Val threshold (τ*) | Val F1 |
+|-------|--------------------|--------|
+| TGNN | 0.15 | 0.0342 |
+| Logistic Regression | 0.96 | 1.0000 |
+| Rule Baseline | 0.50 (binary) | — |
 
 ---
 
-## Confusion Matrices (threshold = 0.50)
+## Test-Set Metrics
 
-### TGNN
+> Positive test examples: **102** / 2000 (5.10%)
+
+| Model | τ | Precision | Recall | F1 | ROC-AUC | PR-AUC | Accuracy |
+|-------|---|-----------|--------|----|---------|--------|----------|
+| **TGNN** | 0.15 | 0.0622 | 0.2255 | 0.0975 | **0.5260** | 0.0726 | 0.7870 |
+| **Logistic Regression** | 0.96 | 1.0000 | 0.4608 | 0.6309 | 0.9874 | 0.8936 | 0.9725 |
+| Rule Baseline | 0.50 | 1.0000 | 0.2353 | 0.3810 | 0.6176 | 0.2743 | 0.9610 |
+
+---
+
+## Confusion Matrices
+
+### TGNN (τ=0.15)
 ```
              Predicted 0  Predicted 1
-Actual 0           1993            0
-Actual 1              7            0
+Actual 0           1551          347
+Actual 1             79           23
 ```
 
-### Rule Baseline
+### Logistic Regression (τ=0.96)
 ```
              Predicted 0  Predicted 1
-Actual 0           1964           29
-Actual 1              5            2
+Actual 0           1898            0
+Actual 1             55           47
 ```
+
+### Rule Baseline (τ=0.50)
+```
+             Predicted 0  Predicted 1
+Actual 0           1898            0
+Actual 1             78           24
+```
+
+---
+
+## False Positives by Account Type
+
+| Account Type | TGNN FP | LR FP | Rule FP |
+|---|---|---|---|
+| agent | 27 | 0 | 0 |
+| beneficiary | 281 | 0 | 0 |
+| government | 6 | 0 | 0 |
+| merchant | 33 | 0 | 0 |
+
+---
+
+## Fraud Ring Detection Rate
+
+> **Detection definition:** A ring is *active in test* if any of its mule accounts
+> appears in a fraud transaction during the test period. A ring is *detected* if
+> at least one of its mule accounts is flagged (predicted positive) by the model.
+
+| Model | Rings Active (test) | Rings Detected | Detection Rate |
+|-------|---------------------|----------------|----------------|
+| TGNN | 14 | 11 | 0.786 |
+| Logistic Regression | 14 | 9 | 0.643 |
+| Rule Baseline | 14 | 6 | 0.429 |
 
 ---
 
 ## ROC Curve
 ![ROC Curve](roc_curve.png)
 
-> **ROC-AUC Comparison:** TGNN achieves **ROC-AUC = 0.8466** compared to **0.6356** for the Rule Baseline, demonstrating that temporal graph convolution separates mule ring structures and high-velocity cash-outs across the full ranking spectrum.
+## Precision-Recall Curve
+![PR Curve](pr_curve.png)
 
 ---
 
-## Top Signals (Sample of Highest TGNN Risk Scores)
+## Top Signals (Highest TGNN Risk Scores)
 
 | Account | TGNN Score | True Label | Signal 1 | Signal 2 | Signal 3 |
 |---------|------------|------------|----------|----------|----------|
-| ACC001924 | 0.2885 | 0 | log_in_amount | unique_senders | in_count |
-| ACC000455 | 0.2679 | 0 | log_in_amount | unique_senders | in_count |
-| ACC001887 | 0.2598 | 0 | amount_std | log_in_amount | log_out_amount |
-| ACC000261 | 0.2584 | 0 | amount_std | forwarding_ratio | log_out_amount |
-| ACC000816 | 0.2582 | 0 | log_in_amount | unique_senders | in_count |
-| ACC001901 | 0.2570 | 0 | log_in_amount | unique_senders | in_count |
-| ACC001182 | 0.2564 | 0 | log_in_amount | unique_senders | in_count |
-| ACC001575 | 0.2561 | 0 | log_in_amount | unique_senders | in_count |
-| ACC000195 | 0.2551 | 0 | log_in_amount | unique_senders | in_count |
-| ACC001949 | 0.2549 | 0 | amount_std | log_out_amount | log_in_amount |
+| ACC000460 | 0.2485 | 1 | amount_std | log_out_amount | in_count |
+| ACC001989 | 0.2272 | 1 | amount_std | log_in_amount | log_out_amount |
+| ACC000905 | 0.2267 | 0 | amount_std | forwarding_ratio | log_out_amount |
+| ACC000570 | 0.2236 | 0 | log_in_amount | unique_senders | in_count |
+| ACC000438 | 0.2216 | 0 | log_in_amount | unique_senders | in_count |
+| ACC000560 | 0.2197 | 0 | log_in_amount | unique_senders | in_count |
+| ACC000576 | 0.2111 | 0 | amount_std | log_out_amount | log_in_amount |
+| ACC000686 | 0.2111 | 0 | forwarding_ratio | log_out_amount | out_count |
+| ACC000673 | 0.2111 | 0 | forwarding_ratio | log_out_amount | out_count |
+| ACC000558 | 0.2111 | 0 | amount_std | log_in_amount | in_count |
+| ACC000669 | 0.2111 | 0 | forwarding_ratio | log_out_amount | out_count |
+| ACC000733 | 0.2111 | 0 | amount_std | log_out_amount | forwarding_ratio |
+| ACC000091 | 0.2111 | 1 | forwarding_ratio | log_out_amount | out_count |
+| ACC001773 | 0.2111 | 0 | forwarding_ratio | log_out_amount | out_count |
+| ACC000864 | 0.2111 | 0 | log_in_amount | unique_senders | in_count |
 
 ---
 
@@ -101,24 +144,26 @@ Actual 1              5            2
 1. **Synthetic data.** Fraud patterns were planted deliberately. Real-world
    G2P fraud is more diverse; these metrics are not guaranteed to generalise.
 
-2. **Severe test class imbalance.** The test period contains only 7
-   fraud-active accounts out of 2000 (0.35%). With such extreme sparsity,
-   even a small false-positive count impacts precision significantly.
+2. **Test class imbalance.** The test period contains 102 fraud-active
+   accounts out of 2000. Precision is sensitive to false-positive count.
 
-3. **Probability calibration.** Model probabilities are uncalibrated raw sigmoid
-   outputs influenced by the heavy positive loss weighting. Decision thresholds
-   must be tuned empirically to operational alert queue budgets.
+3. **Probability calibration.** TGNN sigmoid outputs are uncalibrated due to
+   the heavy positive loss weighting. Decision thresholds should be tuned to
+   the operational alert queue budget.
 
-4. **Temporal granularity.** Graph snapshots are aggregated into 30-minute windows.
-   Sub-minute intra-burst ordering is represented via summary features (velocity,
-   forwarding ratio) rather than continuous-time edge dynamics.
+4. **Receiver labeling.** Both sender AND receiver of a fraud transaction are
+   labeled positive in training. Innocent recipients of ring hops contribute
+   some noise to the positive class.
 
-5. **Model scale.** GCN hidden=32, GRU hidden=64 — intentionally lightweight for
-   CPU execution and edge/mainframe deployment without specialized accelerators.
+5. **Temporal granularity.** 30-minute snapshot windows aggregate sub-minute
+   intra-burst dynamics into summary statistics.
 
-6. **Transparent comparison.** Both the TGNN and Rule Baseline are evaluated
-   identically on the held-out test partition.
+6. **Model scale.** GCN hidden=32, GRU hidden=64 — intentionally lightweight
+   for CPU execution and mainframe deployment.
+
+7. **Transparent comparison.** All three models are evaluated on the identical
+   held-out test partition using thresholds selected on validation data only.
 
 ---
 
-*Generated by `ml/evaluate.py`  |  PulseGuard-Z Phase 2*
+*Generated by `ml/evaluate.py`  |  PulseGuard-Z Phase 2 (Part A v2 dataset)*

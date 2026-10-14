@@ -275,6 +275,47 @@ def save_csvs(accounts, transactions):
     return txn_path, acct_path
 
 
+def save_ring_membership(ring_info, accounts):
+    """
+    Export data/ring_membership.csv with columns [account_id, ring_id].
+
+    One row per (mule_account, ring) pair.  Only covers planted fraud-ring mule
+    accounts; liquidity-drain source accounts are intentionally excluded because
+    they belong to a different fraud typology and no ring_id concept applies to
+    them.  ring_id matches ring_idx from plant_fraud_rings() (0-indexed, 0-29).
+
+    Verification:
+    - Every account_id in the file must exist in accounts.csv.
+    - The number of rows per ring_id must equal ri['n_mules'] from ring_info.
+    """
+    rows = []
+    for ri in ring_info:
+        for mule in ri['mules']:
+            rows.append({'account_id': mule, 'ring_id': int(ri['ring_idx'])})
+
+    rm_df = pd.DataFrame(rows, columns=['account_id', 'ring_id'])
+    path  = DATA_DIR / 'ring_membership.csv'
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    rm_df.to_csv(path, index=False)
+
+    # --- Integrity verification ---
+    valid_ids = set(accounts['account_id'])
+    unknown   = set(rm_df['account_id']) - valid_ids
+    assert not unknown, f'ring_membership contains unknown account IDs: {unknown}'
+
+    for ri in ring_info:
+        actual   = int((rm_df['ring_id'] == ri['ring_idx']).sum())
+        expected = ri['n_mules']
+        assert actual == expected, (
+            f"Ring {ri['ring_idx']}: expected {expected} mule rows, got {actual}"
+        )
+
+    n_rings = rm_df['ring_id'].nunique()
+    print(f'      Saved: {path}  ({len(rm_df)} mule-ring rows across {n_rings} rings)')
+    print('      [OK] ring_membership.csv integrity verified.')
+    return path
+
+
 GREY_NORMAL = '#9E9E9E'
 RED_FRAUD   = '#E53935'
 
@@ -469,6 +510,7 @@ def print_summary(accounts, transactions, txn_path, acct_path, ring_split_counts
 if __name__ == '__main__':
     accounts, transactions, all_fraud_accts, ring_info = assemble_dataset()
     txn_path, acct_path = save_csvs(accounts, transactions)
+    save_ring_membership(ring_info, accounts)
     generate_charts(transactions)
     ring_split_counts = compute_split_stats(transactions, ring_info)
     print_summary(accounts, transactions, txn_path, acct_path, ring_split_counts)

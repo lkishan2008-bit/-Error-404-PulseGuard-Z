@@ -88,7 +88,13 @@ torch.manual_seed(SEED)
 # ---------------------------------------------------------------------------
 WINDOW_MINUTES  = 30
 N_SNAPSHOTS_SEQ = 6           # GRU look-back (3 hours)
-NODE_FEAT_DIM   = 8
+
+# Feature dimensions
+BEHAV_FEAT_DIM  = 8           # Behavioural features computed per snapshot
+# Account types sorted alphabetically -- order must stay consistent everywhere
+ACCT_TYPES      = ["agent", "beneficiary", "government", "merchant"]
+NODE_FEAT_DIM   = BEHAV_FEAT_DIM + len(ACCT_TYPES)  # 8 + 4 = 12
+
 GCN_HIDDEN      = 32
 GCN_LAYERS      = 2
 GRU_HIDDEN      = 64
@@ -122,7 +128,34 @@ def load_data():
     print(f"       Accounts: {N:,}  |  Fraud accounts: {n_fraud_accs:,}")
     print(f"       Transactions: {len(txn):,}  |  Fraud txns: {n_fraud_txns:,}")
 
-    return txn, acct, id2idx, N, all_ids
+    acct_type_tensor = build_account_type_matrix(acct, all_ids)
+    print(f"       Account-type one-hot: {list(acct_type_tensor.shape)}  (types: {ACCT_TYPES})")
+
+    return txn, acct, id2idx, N, all_ids, acct_type_tensor
+
+
+# ---------------------------------------------------------------------------
+# 1b.  Static Account-Type One-Hot Matrix
+# ---------------------------------------------------------------------------
+
+def build_account_type_matrix(acct, all_ids):
+    """
+    Build a static [N, len(ACCT_TYPES)] float32 tensor ordered by all_ids.
+
+    account_type is observable before any transaction occurs and is therefore
+    a legitimate, leakage-free input feature.  ACCT_TYPES is sorted
+    alphabetically so the column mapping is deterministic across training,
+    validation, testing, and inference.
+    """
+    type2col = {t: i for i, t in enumerate(ACCT_TYPES)}
+    id2type  = dict(zip(acct["account_id"], acct["account_type"]))
+    N        = len(all_ids)
+    mat      = np.zeros((N, len(ACCT_TYPES)), dtype=np.float32)
+    for i, aid in enumerate(all_ids):
+        atype = id2type.get(aid, ACCT_TYPES[0])  # fallback: agent
+        col   = type2col.get(atype, 0)
+        mat[i, col] = 1.0
+    return torch.tensor(mat, dtype=torch.float32)  # [N, 4]
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +174,7 @@ def build_snapshot_features(src, dst, amounts, N):
     Feat 6: unique_senders
     Feat 7: amount_std
     """
-    feats = np.zeros((N, NODE_FEAT_DIM), dtype=np.float32)
+    feats = np.zeros((N, BEHAV_FEAT_DIM), dtype=np.float32)
     if len(src) == 0:
         return feats
 
@@ -216,7 +249,7 @@ def build_sparse_adj(src, dst, N):
 # 4.  Build All Graph Snapshots (Exact Vectorized Window Assignment)
 # ---------------------------------------------------------------------------
 
-def build_all_snapshots(txn, N, id2idx):
+def build_all_snapshots(txn, N, id2idx, acct_type_tensor):
     print("[Snapshots] Building 30-minute graph snapshots ...")
     t_min     = txn["timestamp"].min()
     window_td = pd.Timedelta(minutes=WINDOW_MINUTES)
@@ -240,8 +273,14 @@ def build_all_snapshots(txn, N, id2idx):
         a = amount_arr[mask]
         f = fraud_arr[mask]
 
-        feats = build_snapshot_features(s, d, a, N)
-        adj   = build_sparse_adj(s, d, N)
+        # Behavioural features [N, 8]
+        behav   = build_snapshot_features(s, d, a, N)
+        behav_t = torch.tensor(behav, dtype=torch.float32)
+
+        # Concatenate static account-type one-hot -> [N, 12]
+        feats = torch.cat([behav_t, acct_type_tensor], dim=1)
+
+        adj = build_sparse_adj(s, d, N)
 
         lbl = torch.zeros(N, dtype=torch.float32)
         if len(f) > 0 and f.sum() > 0:
@@ -249,7 +288,7 @@ def build_all_snapshots(txn, N, id2idx):
             lbl[d[f == 1]] = 1.0
             fraud_label_count += int(lbl.sum().item())
 
-        snapshots.append((torch.tensor(feats), adj, lbl))
+        snapshots.append((feats, adj, lbl))
 
     print(f"       Total snapshots: {len(snapshots)}  |  Total positive node-snapshots: {fraud_label_count}")
     return snapshots
@@ -408,6 +447,8 @@ def train(snapshots):
     torch.save({
         "state_dict":       model.state_dict(),
         "feat_dim":         NODE_FEAT_DIM,
+        "behav_feat_dim":   BEHAV_FEAT_DIM,
+        "acct_types":       ACCT_TYPES,
         "gcn_hidden":       GCN_HIDDEN,
         "gru_hidden":       GRU_HIDDEN,
         "gcn_layers":       GCN_LAYERS,
@@ -434,8 +475,8 @@ def main():
     print(f"Seed: {SEED}  |  Window: {WINDOW_MINUTES} min  |  Seq: {N_SNAPSHOTS_SEQ} steps")
     print("=" * 66)
 
-    txn, acct, id2idx, N, all_ids = load_data()
-    snapshots = build_all_snapshots(txn, N, id2idx)
+    txn, acct, id2idx, N, all_ids, acct_type_tensor = load_data()
+    snapshots = build_all_snapshots(txn, N, id2idx, acct_type_tensor)
     model, tr_l, vl_l = train(snapshots)
 
     print("=" * 66)
