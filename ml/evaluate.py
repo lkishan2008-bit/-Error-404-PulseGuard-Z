@@ -496,9 +496,9 @@ TEMPLATE = """\
 | Look-Back Sequence ($T$) | 6 snapshots (3.0 hours) | Sliding temporal window sequence |
 | Feature Scaler | `StandardScaler` | **Fitted strictly on training snapshots (0..85)** to prevent any leakage |
 | Node Feature Dimensions | 12 | 8 behavioral features + 4 one-hot account types (`agent`, `beneficiary`, `government`, `merchant`) |
-| Edge Signals | Transaction Volume Weights | $A_{uv} = \\log(1 + \\text{amount}) + 1.0$ with symmetric normalization $D^{-1/2} A D^{-1/2}$ |
+| Edge Signals | Transaction Volume Weights | A_uv = log(1 + amount) + 1.0 with symmetric normalization D^(-1/2) A D^(-1/2) |
 | TGNN Architecture | Concatenation GCN+GRU | 2 GCN layers (hidden=32) + 1 GRU layer (hidden=64) concatenated with target snapshot raw features |
-| Classification Head | 2-Layer MLP | $\\text{Linear}(76, 64) \\to \\text{LayerNorm} \\to \\text{ReLU} \\to \\text{Dropout}(0.30) \\to \\text{Linear}(64, 1) \\to \\text{Sigmoid}$ |
+| Classification Head | 2-Layer MLP | Linear(76, 64) -> LayerNorm -> ReLU -> Dropout(0.30) -> Linear(64, 1) -> Sigmoid |
 | Best Hyperparameters | lr={best_lr}, pos_weight={best_pw} | Selected strictly on validation set F1 score |
 | Best Validation Loss | {best_val_loss:.4f} | Peak validation F1 = {best_val_f1:.4f} |
 | Logistic Regression $C$ | {lr_C} | Tuned via cross-validation on validation set |
@@ -517,12 +517,12 @@ All configurations were trained on CPU with early stopping (patience=3) and eval
 
 ## 4. Threshold Selection (Validation Only)
 
-Decision thresholds were calibrated exclusively on validation data ($\hat{S}_{\\text{val}}$ vs. $y_{\\text{val}}$) by maximizing F1 score. Test set evaluated once with frozen thresholds.
+Decision thresholds were calibrated exclusively on validation data (S_val vs. y_val) by maximizing F1 score. Test set evaluated once with frozen thresholds.
 
-| Model | Selection Criterion | Val Threshold ($\\tau^*$) | Validation F1 |
+| Model | Selection Criterion | Val Threshold ($\tau^*$) | Validation F1 |
 |:---|:---|:---|:---|
-| **TGNN** | $\\arg\\max_\\tau F_1(\\tau; y_{\\text{val}})$ | **{tgnn_tau:.2f}** | **{tgnn_val_f1:.4f}** |
-| **Logistic Regression** | $\\arg\\max_\\tau F_1(\\tau; y_{\\text{val}})$ | **{lr_tau:.2f}** | **{lr_val_f1:.4f}** |
+| **TGNN** | Max F1 on Validation | **{tgnn_tau:.2f}** | **{tgnn_val_f1:.4f}** |
+| **Logistic Regression** | Max F1 on Validation | **{lr_tau:.2f}** | **{lr_val_f1:.4f}** |
 | **Rule Baseline** | Standard Binary Cutoff | 0.50 | {rule_val_f1:.4f} |
 | **Hybrid Model** | {hybrid_val_desc} | **{hybrid_tau:.2f}** | **{hybrid_val_f1:.4f}** |
 
