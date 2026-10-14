@@ -1,6 +1,6 @@
 """
 ==============================================================================
-PulseGuard-Z  -  Phase 2: Temporal GNN Trainer
+PulseGuard-Z  -  Phase 2: Temporal GNN Trainer (Part B2 Improved)
 ==============================================================================
 Project   : PulseGuard-Z (IBM Z Hackathon, event code SSF2026)
 Team      : Error-404
@@ -8,44 +8,19 @@ File      : ml/train_tgnn.py
 
 Architecture Overview
 ---------------------
-We implement a lightweight Temporal Graph Neural Network (TGNN) entirely
-in plain PyTorch (no PyTorch Geometric or DGL) to satisfy the hackathon's
-CPU-demo constraint and ensure full transparency and auditability without
-external C++ graph extensions.
-
-Pipeline
---------
-1. Load data/transactions.csv and data/accounts.csv.
-2. Vectorized 30-minute snapshot construction:
-     - Edge list and node feature extraction per snapshot.
-     - Node features (8 dims):
-         0: out_count
-         1: in_count
-         2: log_out_amount = log1p(out_amount)
-         3: log_in_amount  = log1p(in_amount)
-         4: forwarding_ratio = out_amount / (in_amount + 1e-9)
-         5: unique_receivers
-         6: unique_senders
-         7: amount_std (standard deviation of transaction amounts)
-3. Normalized sparse adjacency matrix per snapshot:
-     - Undirected edge aggregation + self-loops
-     - Symmetric degree normalization: A_norm = D^{-1/2} A D^{-1/2}
-     - Stored as torch.sparse_coo_tensor to avoid dense N x N allocations.
-4. Model Architecture (TGNN):
-     - 2 Graph Convolutional Layers with ReLU activation and Dropout:
-         H' = ReLU(A_norm @ H @ W + b)
-     - GRU over T=6 snapshots (3-hour temporal lookback) per node.
-     - Linear head with Sigmoid activation to produce node fraud probability.
-5. Chronological Split & Supervision:
-     - Chronological train (70%) / validation (15%) / test (15%) split.
-     - Target label aligned to the current snapshot of each sequence.
-     - Balanced positive-weighted BCE loss to address severe class imbalance.
-6. Checkpoint:
-     - Saves trained model weights and metadata to ml/tgnn_model.pt.
-
-Usage
------
-    python ml/train_tgnn.py
+Improved Temporal Graph Neural Network (TGNN) implemented in plain PyTorch:
+1. Leakage-safe feature scaling using StandardScaler fitted strictly on
+   training-period behavioral features.
+2. Temporal graph signal via transaction volume/frequency edge weighting:
+   A_uv = log1p(amount) + 1.0, with symmetric degree normalization:
+   A_norm = D^{-1/2} A D^{-1/2}
+3. Concatenation architecture:
+   Combines final GRU hidden state (temporal context) with target snapshot
+   raw node features (instantaneous state) into a 2-layer MLP classification head:
+   H_comb = [H_GRU || X_raw] -> Linear -> LayerNorm -> ReLU -> Dropout -> Linear -> Sigmoid
+4. Validation-only 4-configuration grid tuning for (lr, pos_weight) with
+   early stopping, running under 10 minutes on CPU.
+5. Preserves exact untouched test period (snapshots 121..143).
 ==============================================================================
 """
 
@@ -56,6 +31,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import f1_score
+from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -84,14 +61,13 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 
 # ---------------------------------------------------------------------------
-# Hyper-parameters
+# Hyper-parameters & Split Boundaries
 # ---------------------------------------------------------------------------
 WINDOW_MINUTES  = 30
 N_SNAPSHOTS_SEQ = 6           # GRU look-back (3 hours)
 
 # Feature dimensions
 BEHAV_FEAT_DIM  = 8           # Behavioural features computed per snapshot
-# Account types sorted alphabetically -- order must stay consistent everywhere
 ACCT_TYPES      = ["agent", "beneficiary", "government", "merchant"]
 NODE_FEAT_DIM   = BEHAV_FEAT_DIM + len(ACCT_TYPES)  # 8 + 4 = 12
 
@@ -99,11 +75,19 @@ GCN_HIDDEN      = 32
 GCN_LAYERS      = 2
 GRU_HIDDEN      = 64
 DROPOUT         = 0.30
-LR              = 3e-3
-MAX_EPOCHS      = 25
-PATIENCE        = 6
-TRAIN_FRAC      = 0.70
-VAL_FRAC        = 0.15        # test = remainder (15%)
+MAX_EPOCHS      = 12
+PATIENCE        = 3
+
+# Exact chronological split counts:
+# Total 144 snapshots (30-min windows)
+# Train: snapshots 0..85  (86 snapshots, 59.7%)
+# Val:   snapshots 86..120 (35 snapshots, 24.3%) -> 108 fraud accounts (>= 50 required!)
+# Test:  snapshots 121..143 (23 snapshots, 16.0%) -> 102 fraud accounts (strictly untouched)
+N_TRAIN_SNAPS   = 86
+N_VAL_SNAPS     = 35
+TRAIN_FRAC      = 86 / 144
+VAL_FRAC        = 35 / 144
+
 
 # ---------------------------------------------------------------------------
 # 1.  Data loading
@@ -141,11 +125,6 @@ def load_data():
 def build_account_type_matrix(acct, all_ids):
     """
     Build a static [N, len(ACCT_TYPES)] float32 tensor ordered by all_ids.
-
-    account_type is observable before any transaction occurs and is therefore
-    a legitimate, leakage-free input feature.  ACCT_TYPES is sorted
-    alphabetically so the column mapping is deterministic across training,
-    validation, testing, and inference.
     """
     type2col = {t: i for i, t in enumerate(ACCT_TYPES)}
     id2type  = dict(zip(acct["account_id"], acct["account_type"]))
@@ -164,15 +143,7 @@ def build_account_type_matrix(acct, all_ids):
 
 def build_snapshot_features(src, dst, amounts, N):
     """
-    Compute 8 node features for accounts in a snapshot using vectorized NumPy operations.
-    Feat 0: out_count
-    Feat 1: in_count
-    Feat 2: log_out_amount
-    Feat 3: log_in_amount
-    Feat 4: forwarding_ratio = out_amt / (in_amt + 1e-9)
-    Feat 5: unique_receivers
-    Feat 6: unique_senders
-    Feat 7: amount_std
+    Compute 8 raw behavioral node features for accounts in a snapshot.
     """
     feats = np.zeros((N, BEHAV_FEAT_DIM), dtype=np.float32)
     if len(src) == 0:
@@ -214,24 +185,29 @@ def build_snapshot_features(src, dst, amounts, N):
 
 
 # ---------------------------------------------------------------------------
-# 3.  Sparse Adjacency (COO) with Symmetric Degree Normalization
+# 3.  Sparse Adjacency (COO) with Volume Weighting & Symmetric Normalization
 # ---------------------------------------------------------------------------
 
-def build_sparse_adj(src, dst, N):
+def build_sparse_adj(src, dst, amounts, N):
     """
     Build a normalized adjacency matrix as a torch.sparse_coo_tensor.
-    Includes undirected edge aggregation, self-loops, and D^{-1/2} A D^{-1/2} scaling.
+    Incorporates transaction volume/frequency edge weights and self-loops:
+    A_norm = D^{-1/2} A D^{-1/2}
     """
     if len(src) == 0:
         idx    = torch.arange(N)
         edge_i = torch.stack([idx, idx])
         vals   = torch.ones(N)
-        return torch.sparse_coo_tensor(edge_i, vals, (N, N))
+        return torch.sparse_coo_tensor(edge_i, vals, (N, N)).coalesce()
 
     s_all  = np.concatenate([src, dst, np.arange(N, dtype=np.int32)])
     d_all  = np.concatenate([dst, src, np.arange(N, dtype=np.int32)])
+    # Volume/frequency signal: log1p(amount) + 1.0 baseline weight for transactions, 1.0 for self-loops
+    amt_weight = np.log1p(amounts).astype(np.float32) + 1.0
+    w_all = np.concatenate([amt_weight, amt_weight, np.ones(N, dtype=np.float32)])
+
     edge_i = torch.tensor(np.stack([s_all, d_all]), dtype=torch.long)
-    vals   = torch.ones(len(s_all), dtype=torch.float32)
+    vals   = torch.tensor(w_all, dtype=torch.float32)
 
     A = torch.sparse_coo_tensor(edge_i, vals, (N, N)).coalesce()
 
@@ -246,15 +222,18 @@ def build_sparse_adj(src, dst, N):
 
 
 # ---------------------------------------------------------------------------
-# 4.  Build All Graph Snapshots (Exact Vectorized Window Assignment)
+# 4.  Build All Graph Snapshots with Leakage-Safe StandardScaler
 # ---------------------------------------------------------------------------
 
-def build_all_snapshots(txn, N, id2idx, acct_type_tensor):
+def build_all_snapshots(txn, N, id2idx, acct_type_tensor, scaler=None):
+    """
+    Build 30-minute graph snapshots.
+    If scaler is None, fit StandardScaler on the training snapshots only.
+    """
     print("[Snapshots] Building 30-minute graph snapshots ...")
     t_min     = txn["timestamp"].min()
     window_td = pd.Timedelta(minutes=WINDOW_MINUTES)
 
-    # Vectorized window assignment avoiding any timestamp unit mismatch
     window_indices = ((txn["timestamp"] - t_min) // window_td).astype(int).values
     n_windows      = int(window_indices.max()) + 1
 
@@ -263,7 +242,9 @@ def build_all_snapshots(txn, N, id2idx, acct_type_tensor):
     amount_arr = txn["amount"].values.astype(np.float32)
     fraud_arr  = txn["is_fraud"].values.astype(np.int32)
 
-    snapshots = []
+    raw_behav_list = []
+    adj_list = []
+    lbl_list = []
     fraud_label_count = 0
 
     for w in range(n_windows):
@@ -273,29 +254,40 @@ def build_all_snapshots(txn, N, id2idx, acct_type_tensor):
         a = amount_arr[mask]
         f = fraud_arr[mask]
 
-        # Behavioural features [N, 8]
-        behav   = build_snapshot_features(s, d, a, N)
-        behav_t = torch.tensor(behav, dtype=torch.float32)
+        behav = build_snapshot_features(s, d, a, N)
+        raw_behav_list.append(behav)
 
-        # Concatenate static account-type one-hot -> [N, 12]
-        feats = torch.cat([behav_t, acct_type_tensor], dim=1)
-
-        adj = build_sparse_adj(s, d, N)
+        adj = build_sparse_adj(s, d, a, N)
+        adj_list.append(adj)
 
         lbl = torch.zeros(N, dtype=torch.float32)
         if len(f) > 0 and f.sum() > 0:
             lbl[s[f == 1]] = 1.0
             lbl[d[f == 1]] = 1.0
             fraud_label_count += int(lbl.sum().item())
+        lbl_list.append(lbl)
 
-        snapshots.append((feats, adj, lbl))
+    # Fit scaler strictly on training snapshots to prevent leakage
+    if scaler is None:
+        train_count = min(N_TRAIN_SNAPS, n_windows)
+        train_behav_concat = np.vstack(raw_behav_list[:train_count])
+        scaler = StandardScaler()
+        scaler.fit(train_behav_concat)
+        print(f"       [Scaler] Fitted StandardScaler on first {train_count} training snapshots.")
+
+    snapshots = []
+    for w in range(n_windows):
+        scaled_behav = scaler.transform(raw_behav_list[w])
+        behav_t = torch.tensor(scaled_behav, dtype=torch.float32)
+        feats = torch.cat([behav_t, acct_type_tensor], dim=1)
+        snapshots.append((feats, adj_list[w], lbl_list[w]))
 
     print(f"       Total snapshots: {len(snapshots)}  |  Total positive node-snapshots: {fraud_label_count}")
-    return snapshots
+    return snapshots, scaler
 
 
 # ---------------------------------------------------------------------------
-# 5.  Model Definition
+# 5.  Model Definition (Concatenation Architecture)
 # ---------------------------------------------------------------------------
 
 class GraphConvLayer(nn.Module):
@@ -311,11 +303,20 @@ class GraphConvLayer(nn.Module):
 
 class TGNN(nn.Module):
     """
-    Temporal GNN: 2 GCN layers + GRU over T snapshots + linear classification head.
+    Improved Temporal GNN:
+    2 GCN layers + GRU over T snapshots.
+    Concatenates final GRU hidden state with raw scaled node features of the target window.
+    2-layer MLP classification head with LayerNorm and Dropout.
     """
     def __init__(self, feat_dim, gcn_hidden, gru_hidden,
                  n_gcn_layers, dropout):
         super().__init__()
+        self.feat_dim   = feat_dim
+        self.gcn_hidden = gcn_hidden
+        self.gru_hidden = gru_hidden
+        self.gcn_layers_count = n_gcn_layers
+        self.dropout_val = dropout
+
         layers = []
         in_d = feat_dim
         for _ in range(n_gcn_layers):
@@ -324,8 +325,17 @@ class TGNN(nn.Module):
         self.gcn_layers = nn.ModuleList(layers)
         self.dropout    = nn.Dropout(dropout)
         self.gru        = nn.GRU(input_size=gcn_hidden, hidden_size=gru_hidden,
-                                  num_layers=1, batch_first=False)
-        self.head       = nn.Linear(gru_hidden, 1)
+                                 num_layers=1, batch_first=False)
+
+        # Concatenate final GRU hidden state [N, gru_hidden] + raw node features [N, feat_dim]
+        comb_dim = gru_hidden + feat_dim
+        self.head = nn.Sequential(
+            nn.Linear(comb_dim, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(64, 1)
+        )
 
     def encode_snapshot(self, feats, adj):
         h = feats
@@ -338,8 +348,11 @@ class TGNN(nn.Module):
         embs = [self.encode_snapshot(f, a) for f, a in zip(feats_seq, adj_seq)]
         stacked = torch.stack(embs, dim=0)       # [T, N, gcn_hidden]
         gru_out, _ = self.gru(stacked)           # [T, N, gru_hidden]
-        last = gru_out[-1]                        # [N, gru_hidden]
-        return torch.sigmoid(self.head(last).squeeze(-1))  # [N]
+        last_gru = gru_out[-1]                   # [N, gru_hidden]
+        target_raw = feats_seq[-1]               # [N, feat_dim]
+        comb = torch.cat([last_gru, target_raw], dim=-1)  # [N, gru_hidden + feat_dim]
+        logits = self.head(comb).squeeze(-1)     # [N]
+        return torch.sigmoid(logits)
 
 
 # ---------------------------------------------------------------------------
@@ -347,9 +360,9 @@ class TGNN(nn.Module):
 # ---------------------------------------------------------------------------
 
 def chronological_split(snapshots):
-    T       = len(snapshots)
-    n_train = int(T * TRAIN_FRAC)
-    n_val   = int(T * VAL_FRAC)
+    T = len(snapshots)
+    n_train = min(N_TRAIN_SNAPS, T)
+    n_val   = min(N_VAL_SNAPS, max(0, T - n_train))
     train_s = snapshots[:n_train]
     val_s   = snapshots[n_train: n_train + n_val]
     test_s  = snapshots[n_train + n_val:]
@@ -358,31 +371,18 @@ def chronological_split(snapshots):
 
 
 # ---------------------------------------------------------------------------
-# 7.  Training Helpers
+# 7.  Training & Validation Helpers
 # ---------------------------------------------------------------------------
-
-def pos_weight_from(snap_list):
-    total_pos = sum(s[2].sum().item() for s in snap_list)
-    total_neg = sum((1 - s[2]).sum().item() for s in snap_list)
-    if total_pos == 0:
-        return torch.tensor(1.0)
-    # Balanced square-root weighting: penalizes false negatives effectively
-    # without overwhelming precision on extreme class imbalance.
-    raw_ratio = total_neg / total_pos
-    balanced_pw = min(raw_ratio ** 0.5, 50.0)
-    return torch.tensor(balanced_pw, dtype=torch.float32)
-
 
 def run_epoch(model, snap_list, optimizer, pw, train_mode):
     model.train(train_mode)
-    criterion = nn.BCELoss(reduction="none")
     total_loss = 0.0
     n_seqs     = 0
+    pos_w = torch.tensor(pw, dtype=torch.float32)
 
     for i in range(len(snap_list) - N_SNAPSHOTS_SEQ + 1):
         seq_f  = [snap_list[j][0] for j in range(i, i + N_SNAPSHOTS_SEQ)]
         seq_a  = [snap_list[j][1] for j in range(i, i + N_SNAPSHOTS_SEQ)]
-        # Supervise on the current window (end of the temporal look-back sequence)
         labels = snap_list[i + N_SNAPSHOTS_SEQ - 1][2]
 
         if train_mode:
@@ -390,8 +390,10 @@ def run_epoch(model, snap_list, optimizer, pw, train_mode):
 
         with torch.set_grad_enabled(train_mode):
             probs = model(seq_f, seq_a)
-            w     = torch.where(labels == 1, pw, torch.ones_like(labels))
-            loss  = (criterion(probs, labels) * w).mean()
+            eps = 1e-7
+            probs_c = torch.clamp(probs, eps, 1.0 - eps)
+            w = torch.where(labels == 1, pos_w, torch.ones_like(labels))
+            loss = -(w * (labels * torch.log(probs_c) + (1.0 - labels) * torch.log(1.0 - probs_c))).mean()
             if train_mode:
                 loss.backward()
                 optimizer.step()
@@ -402,67 +404,151 @@ def run_epoch(model, snap_list, optimizer, pw, train_mode):
     return total_loss / max(n_seqs, 1)
 
 
+def evaluate_val_f1(model, val_s, y_val, N):
+    model.eval()
+    max_scores = np.zeros(N, dtype=np.float64)
+    with torch.no_grad():
+        for i in range(len(val_s) - N_SNAPSHOTS_SEQ + 1):
+            seq_f = [val_s[j][0] for j in range(i, i + N_SNAPSHOTS_SEQ)]
+            seq_a = [val_s[j][1] for j in range(i, i + N_SNAPSHOTS_SEQ)]
+            probs = model(seq_f, seq_a).cpu().numpy()
+            max_scores = np.maximum(max_scores, probs)
+
+    best_tau = 0.50
+    best_f1  = 0.0
+    for tau in np.arange(0.02, 0.98, 0.02):
+        pred = (max_scores >= tau).astype(int)
+        f1   = f1_score(y_val, pred, zero_division=0)
+        if f1 > best_f1:
+            best_f1  = f1
+            best_tau = float(tau)
+
+    return best_f1, best_tau, max_scores
+
+
 # ---------------------------------------------------------------------------
-# 8.  Main Train Function
+# 8.  Validation-Only Grid Tuning (4 Configurations)
 # ---------------------------------------------------------------------------
 
-def train(snapshots):
-    print("\n[Train] Setting up model ...")
+CONFIG_GRID = [
+    {"lr": 1e-3, "pos_weight": 12.0},
+    {"lr": 1e-3, "pos_weight": 18.0},
+    {"lr": 3e-3, "pos_weight": 12.0},
+    {"lr": 3e-3, "pos_weight": 18.0},
+]
+
+
+def train_and_tune(snapshots, scaler, N):
     train_s, val_s, test_s = chronological_split(snapshots)
-    pw = pos_weight_from(train_s)
-    print(f"       pos_weight: {pw.item():.2f}")
 
-    model     = TGNN(NODE_FEAT_DIM, GCN_HIDDEN, GRU_HIDDEN, GCN_LAYERS, DROPOUT)
-    optimizer = Adam(model.parameters(), lr=LR)
+    # Compute validation ground truth per account from validation snapshot labels
+    val_labels_t = torch.zeros(N, dtype=torch.float32)
+    for _, _, lbl in val_s:
+        val_labels_t = torch.clamp(val_labels_t + lbl, max=1.0)
+    y_val = val_labels_t.numpy()
+    print(f"       Validation ground truth fraud accounts: {int(y_val.sum())} (out of {N})")
 
-    best_val_loss  = float("inf")
-    patience_count = 0
-    best_state     = None
-    train_losses   = []
-    val_losses     = []
+    best_overall_f1    = -1.0
+    best_overall_cfg   = None
+    best_overall_state = None
+    best_overall_loss  = float("inf")
+    tuning_history     = []
 
-    print(f"[Train] max {MAX_EPOCHS} epochs | patience {PATIENCE} ...")
-    for epoch in range(1, MAX_EPOCHS + 1):
-        t0      = time.time()
-        tr_l    = run_epoch(model, train_s, optimizer, pw, train_mode=True)
-        vl_l    = run_epoch(model, val_s,   optimizer, pw, train_mode=False)
-        elapsed = time.time() - t0
-        train_losses.append(tr_l)
-        val_losses.append(vl_l)
-        print(f"  Epoch {epoch:02d}/{MAX_EPOCHS}  train={tr_l:.4f}  val={vl_l:.4f}  ({elapsed:.1f}s)")
+    print("\n[Tune] Running 4-configuration validation tuning (max 12 epochs each) ...")
+    start_all = time.time()
 
-        if vl_l < best_val_loss:
-            best_val_loss  = vl_l
-            patience_count = 0
-            best_state     = {k: v.clone() for k, v in model.state_dict().items()}
-        else:
-            patience_count += 1
-            if patience_count >= PATIENCE:
-                print(f"  Early stopping at epoch {epoch}.")
-                break
+    for idx, cfg in enumerate(CONFIG_GRID, 1):
+        lr_val = cfg["lr"]
+        pw_val = cfg["pos_weight"]
+        print(f"\n--- Config {idx}/4: lr={lr_val:.4f}, pos_weight={pw_val:.1f} ---")
 
-    if best_state is not None:
-        model.load_state_dict(best_state)
+        # Fixed seed per configuration for reproducibility
+        torch.manual_seed(SEED + idx)
+        model = TGNN(NODE_FEAT_DIM, GCN_HIDDEN, GRU_HIDDEN, GCN_LAYERS, DROPOUT)
+        optimizer = Adam(model.parameters(), lr=lr_val, weight_decay=1e-4)
+
+        best_cfg_f1    = -1.0
+        best_cfg_loss  = float("inf")
+        best_cfg_state = None
+        patience_count = 0
+        train_losses   = []
+        val_losses     = []
+
+        for epoch in range(1, MAX_EPOCHS + 1):
+            t0 = time.time()
+            tr_l = run_epoch(model, train_s, optimizer, pw_val, train_mode=True)
+            vl_l = run_epoch(model, val_s,   optimizer, pw_val, train_mode=False)
+            val_f1, val_tau, _ = evaluate_val_f1(model, val_s, y_val, N)
+            elapsed = time.time() - t0
+
+            train_losses.append(tr_l)
+            val_losses.append(vl_l)
+            print(f"  Epoch {epoch:02d}/{MAX_EPOCHS}  tr_loss={tr_l:.4f}  vl_loss={vl_l:.4f}  val_F1={val_f1:.4f} (tau={val_tau:.2f})  ({elapsed:.1f}s)")
+
+            # Track best model state within this config based on validation F1
+            if val_f1 > best_cfg_f1 or (val_f1 == best_cfg_f1 and vl_l < best_cfg_loss):
+                best_cfg_f1    = val_f1
+                best_cfg_loss  = vl_l
+                best_cfg_state = {k: v.clone() for k, v in model.state_dict().items()}
+                patience_count = 0
+            else:
+                patience_count += 1
+                if patience_count >= PATIENCE:
+                    print(f"  Early stopping config {idx} at epoch {epoch}.")
+                    break
+
+        cfg_summary = {
+            "config_id": idx,
+            "lr": lr_val,
+            "pos_weight": pw_val,
+            "best_val_f1": best_cfg_f1,
+            "best_val_loss": best_cfg_loss,
+            "epochs_run": len(train_losses),
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+        }
+        tuning_history.append(cfg_summary)
+        print(f"  Config {idx} finished: best_val_F1={best_cfg_f1:.4f}, best_val_loss={best_cfg_loss:.4f}")
+
+        if best_cfg_f1 > best_overall_f1 or (best_cfg_f1 == best_overall_f1 and best_cfg_loss < best_overall_loss):
+            best_overall_f1    = best_cfg_f1
+            best_overall_loss  = best_cfg_loss
+            best_overall_cfg   = cfg
+            best_overall_state = best_cfg_state
+
+    total_tuning_time = time.time() - start_all
+    print(f"\n[Tune] Tuning complete in {total_tuning_time:.1f}s ({total_tuning_time/60:.2f} min).")
+    print(f"[Tune] Best config: lr={best_overall_cfg['lr']}, pos_weight={best_overall_cfg['pos_weight']} (Val F1={best_overall_f1:.4f})")
+
+    # Load and save best overall checkpoint
+    best_model = TGNN(NODE_FEAT_DIM, GCN_HIDDEN, GRU_HIDDEN, GCN_LAYERS, DROPOUT)
+    best_model.load_state_dict(best_overall_state)
 
     torch.save({
-        "state_dict":       model.state_dict(),
-        "feat_dim":         NODE_FEAT_DIM,
-        "behav_feat_dim":   BEHAV_FEAT_DIM,
-        "acct_types":       ACCT_TYPES,
-        "gcn_hidden":       GCN_HIDDEN,
-        "gru_hidden":       GRU_HIDDEN,
-        "gcn_layers":       GCN_LAYERS,
-        "dropout":          DROPOUT,
-        "window_minutes":   WINDOW_MINUTES,
-        "n_snapshots_seq":  N_SNAPSHOTS_SEQ,
-        "train_losses":     train_losses,
-        "val_losses":       val_losses,
-        "best_val_loss":    best_val_loss,
-        "pos_weight":       pw.item(),
+        "state_dict":         best_model.state_dict(),
+        "feat_dim":           NODE_FEAT_DIM,
+        "behav_feat_dim":     BEHAV_FEAT_DIM,
+        "acct_types":         ACCT_TYPES,
+        "gcn_hidden":         GCN_HIDDEN,
+        "gru_hidden":         GRU_HIDDEN,
+        "gcn_layers":         GCN_LAYERS,
+        "dropout":            DROPOUT,
+        "window_minutes":     WINDOW_MINUTES,
+        "n_snapshots_seq":    N_SNAPSHOTS_SEQ,
+        "best_val_loss":      best_overall_loss,
+        "best_val_f1":        best_overall_f1,
+        "pos_weight":         best_overall_cfg["pos_weight"],
+        "lr":                 best_overall_cfg["lr"],
+        "scaler_mean":        scaler.mean_,
+        "scaler_scale":       scaler.scale_,
+        "tuning_history":     tuning_history,
+        "total_tuning_time":  total_tuning_time,
+        "n_train_snaps":      N_TRAIN_SNAPS,
+        "n_val_snaps":        N_VAL_SNAPS,
     }, MODEL_PATH)
 
-    print(f"\n[Saved] Model weights saved to: {MODEL_PATH}")
-    return model, train_losses, val_losses
+    print(f"\n[Saved] Best TGNN model checkpoint saved to: {MODEL_PATH}")
+    return best_model, tuning_history, best_overall_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -471,18 +557,19 @@ def train(snapshots):
 
 def main():
     print("=" * 66)
-    print("PulseGuard-Z  --  Phase 2: Temporal GNN Training")
+    print("PulseGuard-Z  --  Phase 2: Improved TGNN Training & Validation Tuning")
     print(f"Seed: {SEED}  |  Window: {WINDOW_MINUTES} min  |  Seq: {N_SNAPSHOTS_SEQ} steps")
+    print(f"Split: Train={N_TRAIN_SNAPS} snaps | Val={N_VAL_SNAPS} snaps | Test={144 - N_TRAIN_SNAPS - N_VAL_SNAPS} snaps")
     print("=" * 66)
 
     txn, acct, id2idx, N, all_ids, acct_type_tensor = load_data()
-    snapshots = build_all_snapshots(txn, N, id2idx, acct_type_tensor)
-    model, tr_l, vl_l = train(snapshots)
+    snapshots, scaler = build_all_snapshots(txn, N, id2idx, acct_type_tensor)
+    model, tuning_history, best_cfg = train_and_tune(snapshots, scaler, N)
 
     print("=" * 66)
-    print("TRAINING COMPLETE")
-    print(f"  Best val loss : {min(vl_l):.4f}")
-    print(f"  Final train loss : {tr_l[-1]:.4f}")
+    print("TRAINING & TUNING COMPLETE")
+    print(f"  Best Val F1   : {max(h['best_val_f1'] for h in tuning_history):.4f}")
+    print(f"  Selected Cfg  : {best_cfg}")
     print(f"  Model saved to: {MODEL_PATH}")
     print("=" * 66)
 
