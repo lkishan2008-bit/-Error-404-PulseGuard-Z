@@ -72,6 +72,7 @@ from backend.auth import (
     DASHBOARD_USER,
     DASHBOARD_PASSWORD_HASH,
     get_auth_status,
+    get_client_ip,
     get_current_api_key,
     login_rate_limiter,
     session_store,
@@ -263,12 +264,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS Middleware (permits frontend dashboards or local dev servers)
+# CORS Middleware: restrict to explicit allowed origins via environment
+DEFAULT_CORS_ORIGINS = [
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3000",
+]
+cors_env = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+if cors_env:
+    allowed_origins = [orig.strip() for orig in cors_env.split(",") if orig.strip()]
+else:
+    allowed_origins = DEFAULT_CORS_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -486,7 +499,7 @@ def login(req: LoginRequest, request: Request):
     Applies IP rate limiting: max 5 failed attempts per IP within a 5-minute rolling window.
     On success, returns an unguessable 32-byte in-memory Bearer session token.
     """
-    client_ip = request.client.host if request.client and request.client.host else "127.0.0.1"
+    client_ip = get_client_ip(request)
 
     if login_rate_limiter.is_rate_limited(client_ip):
         raise HTTPException(

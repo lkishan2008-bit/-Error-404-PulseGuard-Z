@@ -243,6 +243,28 @@ bearer_scheme = HTTPBearer(
 )
 
 
+TRUSTED_PROXIES = {
+    ip.strip() for ip in os.getenv("TRUSTED_PROXIES", "").split(",") if ip.strip()
+}
+
+
+def get_client_ip(request: Request) -> str:
+    """
+    Safely resolves the client IP address for rate limiting.
+    Does NOT blindly trust X-Forwarded-For headers to prevent IP spoofing attacks.
+    Only inspects X-Forwarded-For if request.client.host is explicitly declared
+    in the TRUSTED_PROXIES allowlist. Otherwise falls back to direct peer IP.
+    """
+    peer_ip = request.client.host if request.client and request.client.host else "127.0.0.1"
+    if TRUSTED_PROXIES and peer_ip in TRUSTED_PROXIES:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            client_candidate = forwarded.split(",")[0].strip()
+            if client_candidate:
+                return client_candidate
+    return peer_ip
+
+
 def get_current_api_key(
     request: Request,
     header_key: Optional[str] = Security(api_key_header_scheme),
@@ -252,15 +274,12 @@ def get_current_api_key(
     Extracts authentication credentials from:
     1. X-API-Key header
     2. Bearer token in Authorization header
-    3. api_key query parameter
+    (Note: Query parameter ?api_key= is intentionally rejected to prevent URL/log credential exposure.)
     """
     if header_key:
         return header_key.strip()
     if bearer_creds and bearer_creds.credentials:
         return bearer_creds.credentials.strip()
-    query_key = request.query_params.get("api_key")
-    if query_key:
-        return query_key.strip()
     return None
 
 
@@ -272,7 +291,7 @@ def verify_api_key(
     FastAPI dependency to verify authentication for protected endpoints.
     Accepts:
     1. A valid, unexpired Bearer session token from /auth/login.
-    2. A valid CONFIGURED_API_KEY (via X-API-Key, Bearer, or ?api_key=).
+    2. A valid CONFIGURED_API_KEY (via X-API-Key or Authorization Bearer header).
     3. If auth is not configured (open development mode), allows access anonymously.
     """
     auth_active = is_auth_enabled()
@@ -325,7 +344,8 @@ def get_auth_status() -> dict:
         "session_ttl_minutes": SESSION_TTL_MINUTES,
         "active_sessions": session_store.active_sessions_count(),
         "rate_limiting": "5 failures per 5 minutes per IP",
+        "trusted_proxies_configured": bool(TRUSTED_PROXIES),
         "header_supported": "X-API-Key",
         "bearer_supported": "Authorization: Bearer <session_token_or_api_key>",
-        "query_param_supported": "api_key",
+        "query_param_supported": "disabled (security hardening: header-only authentication)",
     }
