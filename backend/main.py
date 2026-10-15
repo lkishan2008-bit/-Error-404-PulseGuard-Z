@@ -43,16 +43,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Python 3.14 pre-release compatibility shim for private typing._eval_type
-if sys.version_info >= (3, 14):
+if sys.version_info >= (3, 14) and not getattr(typing, "_pulseguard_eval_shim_installed", False):
     _orig_eval_type = getattr(typing, "_eval_type", None)
     if _orig_eval_type is not None:
         def _compat_eval_type(*args, **kwargs):
             kwargs.pop("prefer_fwd_module", None)
             return _orig_eval_type(*args, **kwargs)
         typing._eval_type = _compat_eval_type
+        typing._pulseguard_eval_shim_installed = True
 
 import pandas as pd
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Security, status
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
@@ -66,7 +67,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from backend.auth import get_auth_status, verify_api_key
+import secrets
+from backend.auth import (
+    DASHBOARD_USER,
+    DASHBOARD_PASSWORD_HASH,
+    get_auth_status,
+    get_current_api_key,
+    login_rate_limiter,
+    session_store,
+    verify_api_key,
+    verify_password,
+)
 from backend.explain import (
     assess_risk_level,
     explain_signal,
@@ -379,6 +390,30 @@ class GraphResponse(BaseModel):
     data_notice: str
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str
+    expires_at: str
+    token_type: str = "Bearer"
+
+
+class LogoutResponse(BaseModel):
+    status: str
+    message: str
+
+
+class SessionCheckResponse(BaseModel):
+    valid: bool
+    username: Optional[str] = None
+    expires_at: Optional[str] = None
+    detail: Optional[str] = None
+
+
 
 # ---------------------------------------------------------------------------
 # Endpoints Implementation
@@ -437,6 +472,98 @@ def auth_status():
     Inspects whether API key verification is enforced or operating in open development mode.
     """
     return get_auth_status()
+
+
+@router.post(
+    "/auth/login",
+    response_model=LoginResponse,
+    summary="Dashboard user authentication",
+    tags=["Authentication"],
+)
+def login(req: LoginRequest, request: Request):
+    """
+    Authenticates a dashboard operator against configured DASHBOARD_USER and DASHBOARD_PASSWORD_HASH.
+    Applies IP rate limiting: max 5 failed attempts per IP within a 5-minute rolling window.
+    On success, returns an unguessable 32-byte in-memory Bearer session token.
+    """
+    client_ip = request.client.host if request.client and request.client.host else "127.0.0.1"
+
+    if login_rate_limiter.is_rate_limited(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please try again after 5 minutes.",
+        )
+
+    valid_user = bool(DASHBOARD_USER and secrets.compare_digest(req.username, DASHBOARD_USER))
+    valid_pass = bool(DASHBOARD_PASSWORD_HASH and verify_password(req.password, DASHBOARD_PASSWORD_HASH))
+
+    if not (valid_user and valid_pass):
+        login_rate_limiter.record_failure(client_ip)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    login_rate_limiter.record_success(client_ip)
+    token, expires_at = session_store.create_session(req.username)
+    return LoginResponse(
+        token=token,
+        username=req.username,
+        expires_at=expires_at.isoformat(),
+        token_type="Bearer",
+    )
+
+
+@router.post(
+    "/auth/logout",
+    response_model=LogoutResponse,
+    summary="Revoke active session token",
+    tags=["Authentication"],
+)
+def logout(
+    request: Request,
+    api_key: Optional[str] = Depends(verify_api_key),
+    token: Optional[str] = Security(get_current_api_key),
+):
+    """
+    Revokes the current Bearer session token from memory.
+    """
+    if token:
+        session_store.revoke_session(token)
+    return LogoutResponse(status="success", message="Session successfully logged out.")
+
+
+@router.get(
+    "/auth/session",
+    response_model=SessionCheckResponse,
+    summary="Validate active session token",
+    tags=["Authentication"],
+)
+def check_session(
+    token: Optional[str] = Security(get_current_api_key),
+):
+    """
+    Inspects whether the provided Bearer token corresponds to an active, unexpired session.
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No session token provided.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    session = session_store.get_session(token)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired or invalid.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return SessionCheckResponse(
+        valid=True,
+        username=session["username"],
+        expires_at=session["expires_at"].isoformat(),
+    )
 
 
 @router.get(
