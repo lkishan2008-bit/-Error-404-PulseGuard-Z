@@ -38,7 +38,7 @@ import os
 import sys
 import typing
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -56,7 +56,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Security, status
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 
@@ -84,6 +84,14 @@ from backend.explain import (
     explain_signal,
     generate_account_narrative,
     get_all_signal_definitions,
+)
+from backend.upload import (
+    UploadValidationError,
+    UploadedDataset,
+    UPLOAD_TTL_MINUTES,
+    generate_sample_csv,
+    process_uploaded_csv,
+    upload_manager,
 )
 
 DATA_DIR = Path(os.getenv("DATA_DIR", str(REPO_ROOT / "data")))
@@ -427,6 +435,62 @@ class SessionCheckResponse(BaseModel):
     detail: Optional[str] = None
 
 
+class UploadResponse(BaseModel):
+    status: str
+    dataset_name: str
+    total_accounts: int
+    total_transactions: int
+    total_volume: float
+    average_transaction_amount: float
+    simulation_window: Dict[str, Optional[str]]
+    flagged_accounts_at_threshold: int
+    threshold_used: float
+    expires_in_minutes: int
+    notice: str
+
+
+class UploadStatusResponse(BaseModel):
+    is_uploaded: bool
+    dataset_name: Optional[str] = None
+    total_accounts: Optional[int] = None
+    total_transactions: Optional[int] = None
+    total_volume: Optional[float] = None
+    expires_at: Optional[str] = None
+    seconds_remaining: Optional[int] = None
+    active_mode: str
+    notice: str
+
+
+def resolve_session_id(request: Request, credential: Optional[str] = None) -> str:
+    """
+    Safely resolves a unique session isolation identifier for per-user upload segregation.
+    Ensures that uploaded datasets and metrics never leak between different operators or judges.
+    """
+    # 1. Bearer session token
+    auth_header = request.headers.get("authorization", "").strip()
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip()
+        if token:
+            return f"bearer:{token}"
+
+    # 2. X-API-Key header
+    api_key_header = request.headers.get("x-api-key", "").strip()
+    if api_key_header:
+        return f"apikey:{api_key_header}"
+
+    # 3. Explicit client session tracking header (for dev mode isolation between browser tabs)
+    client_sid = request.headers.get("x-session-id", "").strip()
+    if client_sid:
+        return f"client:{client_sid}"
+
+    # 4. Auth credential string if provided by verify_api_key
+    if credential and not credential.startswith("dev-mode"):
+        return f"cred:{credential}"
+
+    # 5. Client IP fallback for open dev mode
+    client_ip = get_client_ip(request)
+    return f"ip:{client_ip}"
+
 
 # ---------------------------------------------------------------------------
 # Endpoints Implementation
@@ -467,7 +531,7 @@ def get_health():
             "transactions_csv": str(TRANSACTIONS_CSV),
             "scores_csv": str(SCORES_CSV),
         },
-        auth=get_auth_status(),
+        auth={**get_auth_status(), "active_uploads": upload_manager.active_upload_count()},
         notice=(
             "Benchmark data simulating G2P welfare flash fraud on IBM LinuxONE (SSF2026). "
             "All metrics computed strictly from local CSV datasets."
@@ -579,6 +643,157 @@ def check_session(
     )
 
 
+# ---------------------------------------------------------------------------
+# CSV Upload & Dataset Session Management
+# ---------------------------------------------------------------------------
+@router.post(
+    "/upload",
+    response_model=UploadResponse,
+    summary="Upload transaction CSV for in-memory fraud risk analysis",
+    tags=["Upload"],
+)
+async def upload_csv(
+    request: Request,
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """
+    Accepts arbitrary transaction CSV data (up to 10 MB and 200,000 rows) as raw text/csv body.
+    Processes 100% in memory; strictly isolates dataset to the authenticated session for 30 minutes.
+    """
+    session_id = resolve_session_id(request, api_key)
+
+    body_bytes = await request.body()
+    if not body_bytes or len(body_bytes.strip()) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty upload body. Please send CSV data in the request body with Content-Type: text/csv.",
+        )
+
+    filename = "uploaded_transactions.csv"
+    cd = request.headers.get("content-disposition", "")
+    if "filename=" in cd:
+        parts = cd.split("filename=")
+        if len(parts) > 1:
+            raw_fn = parts[1].split(";")[0].strip('"\' ')
+            if raw_fn:
+                filename = raw_fn
+
+    try:
+        dataset = process_uploaded_csv(session_id, body_bytes, filename=filename)
+    except UploadValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"CSV Validation Error [{exc.code}]: {exc.message}",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to process CSV upload: {str(exc)}",
+        )
+
+    flagged_count = int((dataset.merged_accounts_df["tgnn_score"] >= DEFAULT_RISK_THRESHOLD).sum())
+
+    return UploadResponse(
+        status="success",
+        dataset_name=filename,
+        total_accounts=dataset.summary["total_accounts"],
+        total_transactions=dataset.summary["total_transactions"],
+        total_volume=dataset.summary["total_volume"],
+        average_transaction_amount=dataset.summary["average_transaction_amount"],
+        simulation_window=dataset.summary["simulation_window"],
+        flagged_accounts_at_threshold=flagged_count,
+        threshold_used=DEFAULT_RISK_THRESHOLD,
+        expires_in_minutes=UPLOAD_TTL_MINUTES,
+        notice=dataset.summary["notice"],
+    )
+
+
+@router.get(
+    "/upload/sample",
+    summary="Download sample compliant CSV template",
+    tags=["Upload"],
+)
+def download_sample_csv():
+    """
+    Returns a downloadable sample CSV compliant with all upload validation criteria.
+    """
+    sample_text = generate_sample_csv()
+    return PlainTextResponse(
+        content=sample_text,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="pulseguard_sample_transactions.csv"',
+        },
+    )
+
+
+@router.post(
+    "/upload/reset",
+    summary="Clear uploaded dataset and return to default synthetic demo",
+    tags=["Upload"],
+)
+def reset_to_demo(
+    request: Request,
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """
+    Purges any custom uploaded dataset for the calling session, instantly reverting
+    the dashboard view to the default shared synthetic G2P demo without restarting.
+    """
+    session_id = resolve_session_id(request, api_key)
+    removed = upload_manager.remove_dataset(session_id)
+    return {
+        "status": "success",
+        "message": "Uploaded dataset cleared. Dashboard has returned to the default synthetic demo.",
+        "was_active": removed,
+    }
+
+
+@router.get(
+    "/upload/status",
+    response_model=UploadStatusResponse,
+    summary="Check current dataset status for active session",
+    tags=["Upload"],
+)
+def get_upload_status(
+    request: Request,
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """
+    Returns whether the current user session is viewing a custom uploaded dataset or the default demo,
+    along with time remaining before in-memory expiration.
+    """
+    session_id = resolve_session_id(request, api_key)
+    dataset = upload_manager.get_dataset(session_id)
+
+    if dataset:
+        now = datetime.now(timezone.utc)
+        rem_sec = max(0, int((dataset.expires_at - now).total_seconds()))
+        return UploadStatusResponse(
+            is_uploaded=True,
+            dataset_name=dataset.summary.get("dataset_name"),
+            total_accounts=dataset.summary.get("total_accounts"),
+            total_transactions=dataset.summary.get("total_transactions"),
+            total_volume=dataset.summary.get("total_volume"),
+            expires_at=dataset.expires_at.isoformat(),
+            seconds_remaining=rem_sec,
+            active_mode="custom_upload",
+            notice=dataset.summary.get("notice", ""),
+        )
+
+    return UploadStatusResponse(
+        is_uploaded=False,
+        dataset_name="synthetic_g2p_benchmark",
+        total_accounts=len(repo.accounts_df) if repo.accounts_df is not None else 2000,
+        total_transactions=len(repo.transactions_df) if repo.transactions_df is not None else 50000,
+        total_volume=repo.dataset_summary_cache.get("total_volume") if repo.dataset_summary_cache else 0.0,
+        expires_at=None,
+        seconds_remaining=None,
+        active_mode="default_demo",
+        notice="Displaying default synthetic G2P demo dataset (SSF2026).",
+    )
+
+
 @router.get(
     "/dashboard/summary",
     response_model=DashboardSummaryResponse,
@@ -586,6 +801,7 @@ def check_session(
     tags=["Dashboard"],
 )
 def get_dashboard_summary(
+    request: Request,
     threshold: float = Query(
         default=DEFAULT_RISK_THRESHOLD,
         ge=0.0,
@@ -597,14 +813,25 @@ def get_dashboard_summary(
     """
     Calculates comprehensive fraud monitoring metrics from the underlying CSVs:
     - Total accounts, transaction volume, and fraud proportion
-    - Risk score distribution across the 2,000 accounts
+    - Risk score distribution across accounts
     - Flagged account counts according to the chosen threshold
     - Account type breakdown and transaction type volumes
     - Most frequent top signals among flagged accounts
     """
-    repo.ensure_ready()
-    m_df = repo.merged_accounts_df
-    txns = repo.transactions_df
+    session_id = resolve_session_id(request, api_key)
+    uploaded_ds = upload_manager.get_dataset(session_id)
+
+    if uploaded_ds:
+        m_df = uploaded_ds.merged_accounts_df
+        txns = uploaded_ds.transactions_df
+        ds_summary = uploaded_ds.summary
+        is_uploaded = True
+    else:
+        repo.ensure_ready()
+        m_df = repo.merged_accounts_df
+        txns = repo.transactions_df
+        ds_summary = repo.dataset_summary_cache
+        is_uploaded = False
 
     # Evaluate against threshold
     suspicious_mask = m_df["tgnn_score"] >= threshold
@@ -648,7 +875,7 @@ def get_dashboard_summary(
             "count": int(row["count"]),
             "total_volume": round(float(row["total_volume"]), 2),
             "fraud_count": int(row["fraud_count"]),
-            "fraud_rate_pct": round(float(row["fraud_count"]) / float(row["count"]) * 100, 2),
+            "fraud_rate_pct": round(float(row["fraud_count"]) / float(row["count"]) * 100, 2) if row["count"] > 0 else 0.0,
         }
         for row in tx_type_group.to_dict(orient="records")
     ]
@@ -660,25 +887,31 @@ def get_dashboard_summary(
         "dual_flagged_count": int(dual_mask.sum()),
         "tgnn_only_flagged_count": int(tgnn_only_mask.sum()),
         "score_statistics": {
-            "min": round(float(scores_series.min()), 4),
-            "max": round(float(scores_series.max()), 4),
-            "mean": round(float(scores_series.mean()), 4),
-            "median": round(float(scores_series.median()), 4),
-            "std": round(float(scores_series.std()), 4),
+            "min": round(float(scores_series.min()), 4) if len(scores_series) > 0 else 0.0,
+            "max": round(float(scores_series.max()), 4) if len(scores_series) > 0 else 0.0,
+            "mean": round(float(scores_series.mean()), 4) if len(scores_series) > 0 else 0.0,
+            "median": round(float(scores_series.median()), 4) if len(scores_series) > 0 else 0.0,
+            "std": round(float(scores_series.std()), 4) if len(scores_series) > 1 else 0.0,
         },
         "score_distribution_buckets": distribution_buckets,
     }
 
+    fidelity_notice = (
+        "Custom uploaded dataset analyzed in-memory. Risk scores represent exploratory "
+        "topological estimates from TGNN trained on synthetic G2P data; estimates have not been "
+        "validated on real-world transaction data, and no ground-truth fraud labels exist."
+        if is_uploaded
+        else "Metrics computed directly from local synthetic G2P simulation CSV data (SSF2026)."
+    )
+
     return DashboardSummaryResponse(
-        dataset_summary=repo.dataset_summary_cache,
+        dataset_summary=ds_summary,
         risk_summary=risk_summary,
-        account_type_distribution=repo.dataset_summary_cache["account_types"],
+        account_type_distribution=ds_summary.get("account_types", {}),
         transaction_type_distribution=tx_type_list,
         top_risk_signals_frequency=sorted_signals,
         threshold_applied=threshold,
-        data_fidelity_notice=(
-            "Metrics computed directly from local synthetic G2P simulation CSV data (SSF2026)."
-        ),
+        data_fidelity_notice=fidelity_notice,
     )
 
 
@@ -689,6 +922,7 @@ def get_dashboard_summary(
     tags=["Transactions"],
 )
 def get_transactions(
+    request: Request,
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
     page_size: int = Query(default=50, ge=1, le=1000, description="Records per page (max 1000)."),
     account_id: Optional[str] = Query(
@@ -721,10 +955,15 @@ def get_transactions(
     api_key: Optional[str] = Depends(verify_api_key),
 ):
     """
-    Queries and paginates through the 50,000 transaction records with multi-field filtering.
+    Queries and paginates through transactions with multi-field filtering.
     """
-    repo.ensure_ready()
-    txns = repo.transactions_df
+    session_id = resolve_session_id(request, api_key)
+    uploaded_ds = upload_manager.get_dataset(session_id)
+    if uploaded_ds:
+        txns = uploaded_ds.transactions_df
+    else:
+        repo.ensure_ready()
+        txns = repo.transactions_df
 
     # Quick indexed path if single account_id is requested and no other complex time filter is given
     mask = pd.Series(True, index=txns.index)
@@ -821,6 +1060,7 @@ def get_transactions(
     tags=["Accounts"],
 )
 def get_suspicious_accounts(
+    request: Request,
     threshold: float = Query(
         default=DEFAULT_RISK_THRESHOLD,
         ge=0.0,
@@ -853,8 +1093,15 @@ def get_suspicious_accounts(
     """
     Returns accounts prioritized for fraud compliance review based on the TGNN graph risk score.
     """
-    repo.ensure_ready()
-    df = repo.merged_accounts_df
+    session_id = resolve_session_id(request, api_key)
+    uploaded_ds = upload_manager.get_dataset(session_id)
+    if uploaded_ds:
+        df = uploaded_ds.merged_accounts_df
+        is_uploaded = True
+    else:
+        repo.ensure_ready()
+        df = repo.merged_accounts_df
+        is_uploaded = False
 
     # Mask construction
     mask = df["tgnn_score"] >= threshold
@@ -901,6 +1148,14 @@ def get_suspicious_accounts(
                 )
             )
 
+    risk_note = (
+        "Scores represent exploratory topological graph risk from TGNN embeddings on uploaded data. "
+        "Flagged entities are prioritized for compliance review. No ground-truth labels exist."
+        if is_uploaded
+        else "Scores represent topological graph risk from TGNN embeddings, not absolute probabilities. "
+             "Flagged entities are prioritized for human-in-the-loop compliance review."
+    )
+
     return SuspiciousAccountsResponse(
         threshold_applied=threshold,
         total_flagged=total_flagged,
@@ -908,10 +1163,7 @@ def get_suspicious_accounts(
         page_size=page_size,
         total_pages=total_pages,
         accounts=accounts_list,
-        risk_interpretation_note=(
-            "Scores represent topological graph risk from TGNN embeddings, not absolute probabilities. "
-            "Flagged entities are prioritized for human-in-the-loop compliance review."
-        ),
+        risk_interpretation_note=risk_note,
     )
 
 
@@ -923,6 +1175,7 @@ def get_suspicious_accounts(
 )
 def get_account_detail(
     account_id: str,
+    request: Request,
     threshold: float = Query(
         default=DEFAULT_RISK_THRESHOLD,
         ge=0.0,
@@ -935,24 +1188,47 @@ def get_account_detail(
     Retrieves full profile for an account, including graph risk score, rule flags,
     historical transaction volumes, top driving signals, and recent activity.
     """
-    repo.ensure_ready()
+    session_id = resolve_session_id(request, api_key)
+    uploaded_ds = upload_manager.get_dataset(session_id)
     aid = account_id.strip()
 
-    if aid not in repo.account_map:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Account '{aid}' not found in the PulseGuard-Z dataset. Valid IDs follow format ACC000000 to ACC001999.",
-        )
-
-    acct_data = repo.account_map[aid]
-    score_data = repo.score_map.get(aid, {
-        "tgnn_score": 0.0,
-        "rule_flagged": 0,
-        "true_label": 0,
-        "top_signal_1": "none",
-        "top_signal_2": "none",
-        "top_signal_3": "none",
-    })
+    if uploaded_ds:
+        if aid not in uploaded_ds.account_map:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account '{aid}' not found in uploaded dataset.",
+            )
+        acct_data = uploaded_ds.account_map[aid]
+        score_data = uploaded_ds.score_map.get(aid, {
+            "tgnn_score": 0.0,
+            "rule_flagged": 0,
+            "true_label": 0,
+            "top_signal_1": "none",
+            "top_signal_2": "none",
+            "top_signal_3": "none",
+        })
+        txns = uploaded_ds.transactions_df
+        sent_indices = uploaded_ds.account_sent_tx_map.get(aid, [])
+        recv_indices = uploaded_ds.account_recv_tx_map.get(aid, [])
+    else:
+        repo.ensure_ready()
+        if aid not in repo.account_map:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account '{aid}' not found in dataset.",
+            )
+        acct_data = repo.account_map[aid]
+        score_data = repo.score_map.get(aid, {
+            "tgnn_score": 0.0,
+            "rule_flagged": 0,
+            "true_label": 0,
+            "top_signal_1": "none",
+            "top_signal_2": "none",
+            "top_signal_3": "none",
+        })
+        txns = repo.transactions_df
+        sent_indices = repo.account_sent_tx_map.get(aid, [])
+        recv_indices = repo.account_recv_tx_map.get(aid, [])
 
     tgnn_score = float(score_data["tgnn_score"])
     rule_flagged = bool(score_data["rule_flagged"])
@@ -963,10 +1239,6 @@ def get_account_detail(
     ]
 
     # Aggregate transaction statistics using pre-computed index
-    txns = repo.transactions_df
-    sent_indices = repo.account_sent_tx_map.get(aid, [])
-    recv_indices = repo.account_recv_tx_map.get(aid, [])
-
     sent_df = txns.iloc[sent_indices] if sent_indices else pd.DataFrame(columns=txns.columns)
     recv_df = txns.iloc[recv_indices] if recv_indices else pd.DataFrame(columns=txns.columns)
 
@@ -1078,6 +1350,7 @@ def get_signals_catalog(api_key: Optional[str] = Depends(verify_api_key)):
 )
 def get_account_explanation(
     account_id: str,
+    request: Request,
     threshold: float = Query(
         default=DEFAULT_RISK_THRESHOLD,
         ge=0.0,
@@ -1090,24 +1363,41 @@ def get_account_explanation(
     Provides an interpretable fraud investigator brief for a specific account,
     explaining why the TGNN assigned its score and how individual graph signals interact.
     """
-    repo.ensure_ready()
+    session_id = resolve_session_id(request, api_key)
+    uploaded_ds = upload_manager.get_dataset(session_id)
     aid = account_id.strip()
 
-    if aid not in repo.account_map:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Account '{aid}' does not exist in dataset.",
-        )
-
-    acct_data = repo.account_map[aid]
-    score_data = repo.score_map.get(aid, {
-        "tgnn_score": 0.0,
-        "rule_flagged": 0,
-        "true_label": 0,
-        "top_signal_1": "none",
-        "top_signal_2": "none",
-        "top_signal_3": "none",
-    })
+    if uploaded_ds:
+        if aid not in uploaded_ds.account_map:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account '{aid}' does not exist in uploaded dataset.",
+            )
+        acct_data = uploaded_ds.account_map[aid]
+        score_data = uploaded_ds.score_map.get(aid, {
+            "tgnn_score": 0.0,
+            "rule_flagged": 0,
+            "true_label": 0,
+            "top_signal_1": "none",
+            "top_signal_2": "none",
+            "top_signal_3": "none",
+        })
+    else:
+        repo.ensure_ready()
+        if aid not in repo.account_map:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account '{aid}' does not exist in dataset.",
+            )
+        acct_data = repo.account_map[aid]
+        score_data = repo.score_map.get(aid, {
+            "tgnn_score": 0.0,
+            "rule_flagged": 0,
+            "true_label": 0,
+            "top_signal_1": "none",
+            "top_signal_2": "none",
+            "top_signal_3": "none",
+        })
 
     tgnn_score = float(score_data["tgnn_score"])
     rule_flagged = bool(score_data["rule_flagged"])
@@ -1136,6 +1426,7 @@ def get_account_explanation(
     tags=["Graph"],
 )
 def get_graph(
+    request: Request,
     threshold: float = Query(
         default=DEFAULT_RISK_THRESHOLD,
         ge=0.0,
@@ -1164,19 +1455,39 @@ def get_graph(
     Returns a bounded, high-fidelity transaction network graph for Cytoscape.js visualization.
     Extracts real accounts and transactions, linking high-risk nodes and their counterparties.
     """
-    repo.ensure_ready()
-    txns = repo.transactions_df
-    m_df = repo.merged_accounts_df
+    session_id = resolve_session_id(request, api_key)
+    uploaded_ds = upload_manager.get_dataset(session_id)
+
+    if uploaded_ds:
+        txns = uploaded_ds.transactions_df
+        m_df = uploaded_ds.merged_accounts_df
+        account_map = uploaded_ds.account_map
+        score_map = uploaded_ds.score_map
+        sent_tx_map = uploaded_ds.account_sent_tx_map
+        recv_tx_map = uploaded_ds.account_recv_tx_map
+        data_notice = (
+            "Bounded transaction network extracted from custom uploaded dataset. "
+            "Risk scores represent exploratory topological estimates from TGNN."
+        )
+    else:
+        repo.ensure_ready()
+        txns = repo.transactions_df
+        m_df = repo.merged_accounts_df
+        account_map = repo.account_map
+        score_map = repo.score_map
+        sent_tx_map = repo.account_sent_tx_map
+        recv_tx_map = repo.account_recv_tx_map
+        data_notice = "Bounded real transaction network extracted from transactions.csv and scores.csv."
 
     if focus_account_id:
         aid = focus_account_id.strip()
-        if aid not in repo.account_map:
+        if aid not in account_map:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Account '{aid}' does not exist in dataset.",
             )
-        sent_indices = repo.account_sent_tx_map.get(aid, [])
-        recv_indices = repo.account_recv_tx_map.get(aid, [])
+        sent_indices = sent_tx_map.get(aid, [])
+        recv_indices = recv_tx_map.get(aid, [])
         all_indices = sent_indices + recv_indices
 
         if all_indices:
@@ -1187,7 +1498,7 @@ def get_graph(
 
             cp_scored = []
             for cp in counterparties:
-                cp_score = float(repo.score_map.get(cp, {}).get("tgnn_score", 0.0))
+                cp_score = float(score_map.get(cp, {}).get("tgnn_score", 0.0))
                 cp_has_fraud = int((focus_tx_df[(focus_tx_df["sender_id"] == cp) | (focus_tx_df["receiver_id"] == cp)]["is_fraud"] == 1).sum())
                 cp_scored.append((cp, cp_has_fraud, cp_score))
 
@@ -1253,8 +1564,8 @@ def get_graph(
     node_items = []
     flagged_nodes_count = 0
     for nid in selected_set:
-        acct_row = repo.account_map.get(nid, {})
-        score_row = repo.score_map.get(nid, {})
+        acct_row = account_map.get(nid, {})
+        score_row = score_map.get(nid, {})
         t_score = float(score_row.get("tgnn_score", 0.0))
         r_flag = int(score_row.get("rule_flagged", 0))
         is_flagged = bool((t_score >= threshold) or (r_flag == 1))
@@ -1313,7 +1624,7 @@ def get_graph(
         fraud_edges_count=fraud_edges_count,
         threshold=threshold,
         focus_account_id=focus_account_id,
-        data_notice="Bounded real transaction network extracted from transactions.csv and scores.csv.",
+        data_notice=data_notice,
     )
 
 
