@@ -263,6 +263,154 @@ class TestUploadFeature(unittest.TestCase):
         self.assertIn("exceeds the maximum limit", str(ctx.exception))
 
 
+    def test_money_at_risk_computation_and_na_when_unflagged(self):
+        """
+        Verify:
+        (1) Money at Risk for uploads is computed only from uploaded flows of flagged accounts.
+        (2) Never exceeds the upload total volume.
+        (3) Shows 'n/a' when nothing is flagged (e.g. high threshold).
+        (4) Completely removes the demo figure (Rs 30,29,456.92).
+        """
+        sample_csv = generate_sample_csv()
+        sess_hdr = {"X-Session-ID": "session_test_mar"}
+        upload_res = self.client.post(
+            "/api/upload",
+            content=sample_csv.encode("utf-8"),
+            headers={"Content-Type": "text/csv", **sess_hdr},
+        )
+        self.assertEqual(upload_res.status_code, 200)
+        up_data = upload_res.json()
+        total_upload_vol = up_data["total_volume"]
+
+        # Case A: Low threshold (0.05) flags accounts
+        sum_flagged = self.client.get("/api/dashboard/summary?threshold=0.05", headers=sess_hdr).json()
+        r_sum = sum_flagged["risk_summary"]
+        d_sum = sum_flagged["dataset_summary"]
+        self.assertGreater(r_sum["suspicious_accounts_count"], 0)
+        mar = r_sum["money_at_risk"]
+        self.assertIsNotNone(mar)
+        self.assertGreater(mar, 0.0)
+        # MUST NEVER exceed the upload total
+        self.assertLessEqual(mar, total_upload_vol)
+        # MUST NOT be the demo figure
+        self.assertNotEqual(mar, 3029456.92)
+        self.assertNotEqual(d_sum.get("fraud_volume"), 3029456.92)
+        self.assertIn("₹", r_sum["money_at_risk_display"])
+
+        # Case B: High threshold (0.999) flags NOTHING
+        sum_unflagged = self.client.get("/api/dashboard/summary?threshold=0.999", headers=sess_hdr).json()
+        r_unflagged = sum_unflagged["risk_summary"]
+        d_unflagged = sum_unflagged["dataset_summary"]
+        self.assertEqual(r_unflagged["suspicious_accounts_count"], 0)
+        # MUST show "n/a" when nothing is flagged
+        self.assertIsNone(r_unflagged["money_at_risk"])
+        self.assertEqual(r_unflagged["money_at_risk_display"], "n/a")
+        self.assertEqual(d_unflagged["money_at_risk_display"], "n/a")
+        # Demo figure must NEVER appear
+        self.assertNotEqual(r_unflagged["money_at_risk"], 3029456.92)
+        self.assertNotEqual(d_unflagged.get("fraud_volume"), 3029456.92)
+
+    def test_time_windows_real_count_for_upload(self):
+        """Verify upload replaces '144 Time Windows' with the real time windows count."""
+        sample_csv = generate_sample_csv()
+        sess_hdr = {"X-Session-ID": "session_test_tw"}
+        up_res = self.client.post(
+            "/api/upload",
+            content=sample_csv.encode("utf-8"),
+            headers={"Content-Type": "text/csv", **sess_hdr},
+        ).json()
+        # 90 minutes / 30 min window = 4 windows
+        real_tw = up_res["time_windows"]
+        self.assertEqual(real_tw, 4)
+        self.assertNotEqual(real_tw, 144)
+
+        # /api/upload/status also returns real time windows
+        st = self.client.get("/api/upload/status", headers=sess_hdr).json()
+        self.assertEqual(st["time_windows"], 4)
+
+        # /api/dashboard/summary dataset_summary also returns real time windows
+        sum_data = self.client.get("/api/dashboard/summary", headers=sess_hdr).json()
+        self.assertEqual(sum_data["dataset_summary"]["time_windows"], 4)
+
+        # Resetting back to demo returns 144
+        self.client.post("/api/upload/reset", headers=sess_hdr)
+        demo_st = self.client.get("/api/upload/status", headers=sess_hdr).json()
+        self.assertEqual(demo_st["time_windows"], 144)
+        demo_sum = self.client.get("/api/dashboard/summary", headers=sess_hdr).json()
+        self.assertEqual(demo_sum["dataset_summary"]["time_windows"], 144)
+
+    def test_badge_uploaded_filename_and_demo_after_reset(self):
+        """Verify badge shows 'UPLOADED: <file name>' during upload and 'DEMO (G2P)' after reset."""
+        sample_csv = generate_sample_csv()
+        sess_hdr = {
+            "X-Session-ID": "session_test_badge",
+            "X-Filename": "quarterly_audit_2026.csv",
+        }
+        upload_res = self.client.post(
+            "/api/upload",
+            content=sample_csv.encode("utf-8"),
+            headers={"Content-Type": "text/csv", **sess_hdr},
+        )
+        self.assertEqual(upload_res.status_code, 200)
+        self.assertEqual(upload_res.json()["dataset_name"], "quarterly_audit_2026.csv")
+
+        # Status check reflects the uploaded filename
+        st_res = self.client.get("/api/upload/status", headers={"X-Session-ID": "session_test_badge"}).json()
+        self.assertTrue(st_res["is_uploaded"])
+        self.assertEqual(st_res["dataset_name"], "quarterly_audit_2026.csv")
+
+        # Reset back to demo
+        reset_res = self.client.post("/api/upload/reset", headers={"X-Session-ID": "session_test_badge"})
+        self.assertEqual(reset_res.status_code, 200)
+
+        # Status now reports DEMO (G2P)
+        demo_st = self.client.get("/api/upload/status", headers={"X-Session-ID": "session_test_badge"}).json()
+        self.assertFalse(demo_st["is_uploaded"])
+        self.assertEqual(demo_st["dataset_name"], "DEMO (G2P)")
+
+    def test_new_browser_session_always_starts_on_demo_and_expires(self):
+        """
+        Verify:
+        (1) A new browser session always starts on the demo (isolated from other sessions).
+        (2) Upload state expires after TTL.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        sample_csv = generate_sample_csv()
+        # Session A uploads
+        self.client.post(
+            "/api/upload",
+            content=sample_csv.encode("utf-8"),
+            headers={"Content-Type": "text/csv", "X-Session-ID": "session_tab_user_a"},
+        )
+        st_a = self.client.get("/api/upload/status", headers={"X-Session-ID": "session_tab_user_a"}).json()
+        self.assertTrue(st_a["is_uploaded"])
+
+        # Brand new browser session (different session ID generated by sessionStorage)
+        st_new = self.client.get("/api/upload/status", headers={"X-Session-ID": "session_tab_brand_new"}).json()
+        self.assertFalse(st_new["is_uploaded"])
+        self.assertEqual(st_new["dataset_name"], "DEMO (G2P)")
+        self.assertEqual(st_new["active_mode"], "default_demo")
+
+        # Session with no header at all (anonymous browser session)
+        st_anon = self.client.get("/api/upload/status").json()
+        self.assertFalse(st_anon["is_uploaded"])
+        self.assertEqual(st_anon["dataset_name"], "DEMO (G2P)")
+
+        # Verify expiration: simulate TTL elapsed
+        ds_a = upload_manager.get_dataset("client:session_tab_user_a")
+        self.assertIsNotNone(ds_a)
+        # Artificially set expires_at in the past
+        ds_a.expires_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+        self.assertTrue(ds_a.is_expired())
+
+        # Now querying should return demo because it expired
+        st_a_expired = self.client.get("/api/upload/status", headers={"X-Session-ID": "session_tab_user_a"}).json()
+        self.assertFalse(st_a_expired["is_uploaded"])
+        self.assertEqual(st_a_expired["dataset_name"], "DEMO (G2P)")
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
