@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 import backend
 from fastapi.testclient import TestClient
 
+from backend.auth import verify_api_key
 from backend.main import app, repo
 from backend.upload import (
     MAX_UPLOAD_ROWS,
@@ -33,8 +34,13 @@ from backend.upload import (
 class TestUploadFeature(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        app.dependency_overrides[verify_api_key] = lambda: "test-upload-client"
         cls.client = TestClient(app)
         repo.load_data()
+
+    @classmethod
+    def tearDownClass(cls):
+        app.dependency_overrides.pop(verify_api_key, None)
 
     def setUp(self):
         # Clear upload manager between tests
