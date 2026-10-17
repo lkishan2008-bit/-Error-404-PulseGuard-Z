@@ -352,6 +352,7 @@ class SuspiciousAccountItem(BaseModel):
     account_type: str
     tgnn_score: float
     rule_flagged: int
+    detection_method: str
     true_label: int
     is_fraud_account: int
     risk_level: str
@@ -488,6 +489,9 @@ class UploadStatusResponse(BaseModel):
     seconds_remaining: Optional[int] = None
     active_mode: str
     notice: str
+    history_windows: Optional[int] = None
+    required_history_windows: Optional[int] = None
+    insufficient_history: Optional[bool] = None
 
 
 def resolve_session_id(request: Request, credential: Optional[str] = None) -> str:
@@ -937,6 +941,9 @@ def get_upload_status(
             seconds_remaining=rem_sec,
             active_mode="custom_upload",
             notice=dataset.summary.get("notice", ""),
+            history_windows=dataset.summary.get("history_windows"),
+            required_history_windows=dataset.summary.get("required_history_windows"),
+            insufficient_history=dataset.summary.get("insufficient_history"),
         )
 
     return UploadStatusResponse(
@@ -1264,10 +1271,18 @@ def get_suspicious_accounts(
         df = repo.merged_accounts_df
         is_uploaded = False
 
-    # Mask construction
-    tgnn_mask = df["tgnn_score"] >= threshold
+    # Short uploads may show threshold-matching accounts for manual review,
+    # but must not present their TGNN scores as reliable detections.
+    insufficient_history = bool(
+        is_uploaded and uploaded_ds.summary.get("insufficient_history", False)
+    )
+    tgnn_threshold_mask = df["tgnn_score"] >= threshold
     rule_mask = df["rule_flagged"] == 1
-    mask = rule_mask if rule_flagged_only else (tgnn_mask | rule_mask)
+    if rule_flagged_only:
+        mask = rule_mask
+    else:
+        # On short history, keep candidates reviewable; label them review-only below.
+        mask = tgnn_threshold_mask | rule_mask
 
     if account_type:
         mask = mask & (df["account_type"] == account_type.strip().lower())
@@ -1293,12 +1308,25 @@ def get_suspicious_accounts(
             sig_summaries = [explain_signal(s)["title"] for s in clean_sigs]
             risk_tier = assess_risk_level(row["tgnn_score"], threshold, bool(row["rule_flagged"]))
 
+            row_tgnn_threshold_match = bool(row["tgnn_score"] >= threshold)
+            row_rule_flagged = bool(row["rule_flagged"] == 1)
+            if insufficient_history and row_tgnn_threshold_match and not row_rule_flagged:
+                detection_method = "Insufficient history — review only"
+            elif insufficient_history and row_tgnn_threshold_match and row_rule_flagged:
+                detection_method = "Rule-based signal; TGNN review only"
+            elif row_tgnn_threshold_match and row_rule_flagged:
+                detection_method = "TGNN + Rule"
+            elif row_tgnn_threshold_match:
+                detection_method = "TGNN"
+            else:
+                detection_method = "Rule-based signal"
             accounts_list.append(
                 SuspiciousAccountItem(
                     account_id=row["account_id"],
                     account_type=row["account_type"],
                     tgnn_score=round(float(row["tgnn_score"]), 4),
                     rule_flagged=int(row["rule_flagged"]),
+                    detection_method=detection_method,
                     true_label=int(row["true_label"]),
                     is_fraud_account=int(row["is_fraud_account"]),
                     risk_level=risk_tier,

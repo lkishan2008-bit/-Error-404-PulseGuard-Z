@@ -398,7 +398,8 @@
         <div class="uab-left">
           <span class="uab-badge">CUSTOM UPLOAD ACTIVE</span>
           <span id="uab-text" style="font-weight:600;color:var(--text-white);">uploaded.csv &middot; 20 txns &middot; 13 accounts</span>
-          <span class="uab-sub">(Exploratory TGNN Estimates &middot; Session-Isolated)</span>
+          <span class="uab-sub">(Exploratory Estimates &middot; Session-Isolated)</span>
+          <span id="uab-history" class="uab-sub" role="status" aria-live="polite"></span>
         </div>
         <div class="uab-right">
           <span id="uab-timer" class="uab-timer">Expires in 30m</span>
@@ -736,7 +737,7 @@ const btnReturnDemo=E("btn-return-demo"),btnBannerReset=E("btn-banner-reset");
 const fileInput=E("file-input"),dropZone=E("drop-zone");
 const dropTextMain=E("drop-text-main"),dropFileInfo=E("drop-file-info");
 const uploadErr=E("upload-err"),uploadBtnSpinner=E("upload-btn-spinner"),uploadBtnTxt=E("upload-btn-txt");
-const uploadActiveBanner=E("upload-active-banner"),uabText=E("uab-text"),uabTimer=E("uab-timer");
+const uploadActiveBanner=E("upload-active-banner"),uabText=E("uab-text"),uabTimer=E("uab-timer"),uabHistory=E("uab-history");
 const datasetPill=E("dataset-pill"),datasetDot=E("dataset-dot"),datasetModeTxt=E("dataset-mode-txt");
 const navUpload=E("nav-upload");
 
@@ -1133,6 +1134,16 @@ function setUploadActiveUI(data,filename){
   const txCount=data.total_transactions||(data.dataset_summary&&data.dataset_summary.total_transactions)||0;
   const acctCount=data.total_accounts||(data.dataset_summary&&data.dataset_summary.total_accounts)||0;
   uabText.textContent=`${fn} · ${fnum(txCount)} txns · ${fnum(acctCount)} accounts`;
+  const actualWindows=data.history_windows??(data.dataset_summary&&data.dataset_summary.history_windows);
+  const requiredWindows=data.required_history_windows??(data.dataset_summary&&data.dataset_summary.required_history_windows);
+  const insufficient=data.insufficient_history??(data.dataset_summary&&data.dataset_summary.insufficient_history);
+  if(uabHistory){
+    uabHistory.textContent=(actualWindows!==undefined&&requiredWindows!==undefined)
+      ? (insufficient
+        ? `Insufficient history to score reliably · ${actualWindows}/${requiredWindows} required 30-minute windows`
+        : `History available · ${actualWindows}/${requiredWindows} required 30-minute windows`)
+      : "History validation unavailable";
+  }
 
   uploadExpirySeconds=data.seconds_remaining||data.expires_in_seconds||(data.expires_in_minutes?data.expires_in_minutes*60:1800);
   updateExpiryDisplay();
@@ -1160,11 +1171,12 @@ function setDemoActiveUI(){
   datasetModeTxt.textContent="DEMO (G2P)";
   btnReturnDemo.style.display="none";
   uploadActiveBanner.style.display="none";
+  if(E("uab-history")) E("uab-history").textContent="";
   const moneyLabel=document.querySelector("#val-money").previousElementSibling;
   const moneyNote=document.querySelector("#money-note");
   moneyLabel.textContent="Money at Risk";
   document.querySelector("#val-money").textContent="₹30,29,456.92";
-  if(moneyNote)moneyNote.textContent="0.60% of G2P Welfare Outlays";
+  if(moneyNote)moneyNote.textContent="Demo figure · not validated against fraud volume";
   const windows=document.querySelector("#val-windows");
   if(windows)windows.textContent="144 Time Windows · G2P Transfers";
 }
@@ -1198,12 +1210,17 @@ async function loadMetrics(){
     E("val-acct").textContent=fnum(fc);
     E("nav-badge-mules").textContent=fnum(fc);
     E("desc-acct").textContent=`τ = ${thresh.toFixed(2)} · Compliance Priority`;
-    const fv=ds.fraud_volume!==undefined?ds.fraud_volume:3029456.92;
-    E("val-money").textContent=isUploadActive?"₹—":inr(fv);
+    E("val-money").textContent=isUploadActive?"₹—":"₹30,29,456.92";
     
-    const moneyNote=document.querySelector("#money-note"); if(moneyNote) moneyNote.textContent=isUploadActive?"Unvalidated · no ground-truth labels":"0.60% of G2P Welfare Outlays";
+    const moneyNote=document.querySelector("#money-note"); if(moneyNote) moneyNote.textContent=isUploadActive?"Unvalidated · no ground-truth labels":"Demo figure · not validated against fraud volume";
       const windows=document.querySelector("#val-windows");
-      if(windows){const actual=ds.history_windows; const required=ds.required_history_windows; windows.textContent=(actual!==undefined && required!==undefined)?`${actual}/${required} history windows${ds.insufficient_history?" · Insufficient history":""}`:"History validation unavailable";}
+      if(windows){
+        const actual=ds.history_windows;
+        const required=ds.required_history_windows;
+        windows.textContent=isUploadActive && actual!==undefined && required!==undefined
+          ? `${actual}/${required} history windows${ds.insufficient_history?" · Insufficient history":""}`
+          : isUploadActive ? "History validation unavailable" : "144 Time Windows · G2P Transfers";
+      }
     if(d.is_uploaded_data||d.dataset_mode==="uploaded"){
       setUploadActiveUI(d);
     }else if(isUploadActive){
@@ -1245,7 +1262,18 @@ async function loadAlerts(){
 
       const atop=document.createElement("div");atop.className="atop";
       const aid=document.createElement("span");aid.className="aid";aid.textContent=a.account_id;
-      const ascore=document.createElement("span");ascore.className="ascore";ascore.textContent=`TGNN ${Number(a.tgnn_score).toFixed(4)}`;
+      const ascore=document.createElement("span");
+      ascore.className="ascore";
+      const method=String(a.detection_method||"TGNN");
+      if(method.startsWith("Insufficient history")){
+        ascore.textContent="Review only · insufficient history";
+      }else if(method.startsWith("Rule-based signal")){
+        ascore.textContent=method;
+      }else if(method==="TGNN + Rule"){
+        ascore.textContent="TGNN + Rule";
+      }else{
+        ascore.textContent=`TGNN ${Number(a.tgnn_score).toFixed(4)}`;
+      }
       atop.appendChild(aid);atop.appendChild(ascore);
 
       const asig=document.createElement("div");asig.className="asig";asig.textContent=sig;
