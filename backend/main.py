@@ -849,7 +849,7 @@ async def upload_csv(
             detail=f"Failed to process CSV upload: {str(exc)}",
         )
 
-    flagged_count = int((dataset.merged_accounts_df["tgnn_score"] >= DEFAULT_RISK_THRESHOLD).sum())
+    flagged_count = int(((dataset.merged_accounts_df["tgnn_score"] >= DEFAULT_RISK_THRESHOLD) | (dataset.merged_accounts_df["rule_flagged"] == 1)).sum())
 
     return UploadResponse(
         status="success",
@@ -992,10 +992,12 @@ def get_dashboard_summary(
         is_uploaded = False
 
     # Evaluate against threshold
-    suspicious_mask = m_df["tgnn_score"] >= threshold
+    tgnn_mask = m_df["tgnn_score"] >= threshold
     rule_mask = m_df["rule_flagged"] == 1
-    dual_mask = suspicious_mask & rule_mask
-    tgnn_only_mask = suspicious_mask & (~rule_mask)
+    suspicious_mask = tgnn_mask | rule_mask
+    dual_mask = tgnn_mask & rule_mask
+    tgnn_only_mask = tgnn_mask & (~rule_mask)
+    rule_only_mask = rule_mask & (~tgnn_mask)
 
     scores_series = m_df["tgnn_score"]
 
@@ -1044,6 +1046,7 @@ def get_dashboard_summary(
         "rule_flagged_accounts_count": int(rule_mask.sum()),
         "dual_flagged_count": int(dual_mask.sum()),
         "tgnn_only_flagged_count": int(tgnn_only_mask.sum()),
+        "rule_only_flagged_count": int(rule_only_mask.sum()),
         "score_statistics": {
             "min": round(float(scores_series.min()), 4) if len(scores_series) > 0 else 0.0,
             "max": round(float(scores_series.max()), 4) if len(scores_series) > 0 else 0.0,
@@ -1262,9 +1265,9 @@ def get_suspicious_accounts(
         is_uploaded = False
 
     # Mask construction
-    mask = df["tgnn_score"] >= threshold
-    if rule_flagged_only:
-        mask = mask & (df["rule_flagged"] == 1)
+    tgnn_mask = df["tgnn_score"] >= threshold
+    rule_mask = df["rule_flagged"] == 1
+    mask = rule_mask if rule_flagged_only else (tgnn_mask | rule_mask)
 
     if account_type:
         mask = mask & (df["account_type"] == account_type.strip().lower())

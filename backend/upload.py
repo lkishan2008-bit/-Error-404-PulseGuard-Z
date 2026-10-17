@@ -579,6 +579,15 @@ def process_uploaded_csv(
     total_vol = float(txn_df["amount"].sum())
     total_accts = len(acct_df)
 
+    # Match the inference pipeline's 30-minute snapshot calculation.
+    history_span = txn_df["timestamp"].max() - txn_df["timestamp"].min()
+    history_windows = max(
+        1,
+        int(history_span // pd.Timedelta(minutes=WINDOW_MINUTES)) + 1,
+    )
+    required_history_windows = N_SNAPSHOTS_SEQ
+    insufficient_history = history_windows < required_history_windows
+
     ts_min = txn_df["timestamp"].min().strftime("%Y-%m-%d %H:%M:%S")
     ts_max = txn_df["timestamp"].max().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -603,10 +612,19 @@ def process_uploaded_csv(
         },
         "account_types": acct_df["account_type"].value_counts().to_dict(),
         "ground_truth_fraud_accounts": 0,
+        "scoring_method": "TGNN",
+        "history_windows": history_windows,
+        "required_history_windows": required_history_windows,
+        "insufficient_history": insufficient_history,
         "notice": (
-            "Custom uploaded dataset analyzed in-memory. Risk scores represent exploratory "
-            "topological graph estimates from the TGNN model trained on synthetic G2P data. "
-            "No ground-truth fraud labels exist for uploaded data."
+            "Experimental estimate from a TGNN model trained on synthetic G2P data. "
+            "No accuracy is measured for uploads; no ground-truth fraud labels are available."
+            + (
+                f" LIMITED HISTORY: this upload contains {history_windows} 30-minute "
+                f"windows; the model sequence requires {required_history_windows}. "
+                "Early snapshots are repeated to fill the sequence, so scores may be unreliable."
+                if insufficient_history else ""
+            )
         ),
     }
 

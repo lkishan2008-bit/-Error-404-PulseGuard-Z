@@ -57,9 +57,6 @@ Decision thresholds were calibrated exclusively on validation data (S_val vs. y_
 | **Rule Baseline** | Standard Binary Cutoff | 0.50 | 0.4460 |
 | **Hybrid Model** | Score Blend: 0.6·TGNN + 0.4·LR | **0.63** | **0.9507** |
 
-*Note on Validation F1:* The in-training grid search (§3) evaluated sequence windows exclusively inside the isolated validation partition (`val_s[0..34]`), which begins evaluating target snapshots only from snapshot 91 onward (missing snapshots 86–90 where initial fraud bursts occurred, resulting in peak in-epoch F1=0.4348). In contrast, the post-training threshold calibration above (§4) utilizes `tgnn_inference()` with continuous sliding look-back across the train-val boundary covering all 35 validation snapshots (86..120) and all 108 validation fraud accounts, reaching peak F1=0.9273 at $\tau^*=0.81$.
-
-
 ---
 
 ## 5. Final Test-Set Performance Evaluation
