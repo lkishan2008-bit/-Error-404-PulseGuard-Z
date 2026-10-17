@@ -67,6 +67,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import platform
+import re
 import secrets
 from backend.auth import (
     DASHBOARD_USER,
@@ -74,8 +76,10 @@ from backend.auth import (
     get_auth_status,
     get_client_ip,
     get_current_api_key,
+    hash_password,
     login_rate_limiter,
     session_store,
+    user_store,
     verify_api_key,
     verify_password,
 )
@@ -411,6 +415,19 @@ class GraphResponse(BaseModel):
     data_notice: str
 
 
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=32, description="Operator username")
+    password: str = Field(..., min_length=8, max_length=128, description="Operator password")
+
+
+class RegisterResponse(BaseModel):
+    status: str
+    message: str
+    username: str
+    role: str = "operator"
+    created_at: str
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -419,6 +436,7 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     username: str
+    role: str = "operator"
     expires_at: str
     token_type: str = "Bearer"
 
@@ -431,8 +449,19 @@ class LogoutResponse(BaseModel):
 class SessionCheckResponse(BaseModel):
     valid: bool
     username: Optional[str] = None
+    role: Optional[str] = None
     expires_at: Optional[str] = None
     detail: Optional[str] = None
+
+
+class SystemInfoResponse(BaseModel):
+    machine: str
+    system: str
+    processor: str
+    python_version: str
+    platform_string: str
+    service: str = "PulseGuard-Z"
+    status: str = "online"
 
 
 class UploadResponse(BaseModel):
@@ -552,6 +581,87 @@ def auth_status():
 
 
 @router.post(
+    "/auth/register",
+    response_model=RegisterResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register new operator account",
+    tags=["Authentication"],
+)
+def register(req: RegisterRequest, request: Request):
+    """
+    Registers a new operator user account with cryptographically secure PBKDF2-HMAC-SHA256 password hashing.
+    Server-side validation guarantees:
+    - Minimum 3 and maximum 32 alphanumeric/dash/underscore/dot characters for username.
+    - Password must be at least 8 characters and contain at least one letter and one number or special character.
+    - Administrator role is NEVER granted to newly registered users (strictly granted 'operator').
+    - Usernames matching the configured administrator or system keywords are strictly reserved.
+    - Prevents duplicate username registrations.
+    """
+    client_ip = get_client_ip(request)
+
+    if login_rate_limiter.is_rate_limited(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts. Please try again after 5 minutes.",
+        )
+
+    clean_u = req.username.strip()
+    if not re.match(r"^[a-zA-Z0-9_\-\.]{3,32}$", clean_u):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Username must be between 3 and 32 characters and contain only letters, numbers, underscores, dashes, or dots.",
+        )
+
+    # Reserved username check - never allow registering or impersonating administrator
+    reserved_names = {"admin", "administrator", "root", "system", "pulseguard", "supervisor"}
+    if DASHBOARD_USER:
+        reserved_names.add(DASHBOARD_USER.lower())
+
+    if clean_u.lower() in reserved_names:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Username '{clean_u}' is reserved. Administrator privileges cannot be registered.",
+        )
+
+    if user_store.user_exists(clean_u):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Username '{clean_u}' is already registered. Please choose another username.",
+        )
+
+    # Password strength validation
+    if len(req.password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Password must be at least 8 characters long.",
+        )
+    if len(req.password) > 128:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Password cannot exceed 128 characters.",
+        )
+    has_letter = any(c.isalpha() for c in req.password)
+    has_num_or_symbol = any(c.isdigit() or not c.isalnum() for c in req.password)
+    if not (has_letter and has_num_or_symbol):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Password must contain at least one letter and at least one number or special character.",
+        )
+
+    pwd_hash = hash_password(req.password)
+    # Strictly enforce operator role: newly registered users NEVER receive admin privileges
+    user_record = user_store.create_user(username=clean_u, password_hash=pwd_hash, role="operator")
+
+    return RegisterResponse(
+        status="success",
+        message="Operator account registered successfully. You can now sign in.",
+        username=user_record["username"],
+        role="operator",
+        created_at=user_record["created_at"],
+    )
+
+
+@router.post(
     "/auth/login",
     response_model=LoginResponse,
     summary="Dashboard user authentication",
@@ -559,7 +669,10 @@ def auth_status():
 )
 def login(req: LoginRequest, request: Request):
     """
-    Authenticates a dashboard operator against configured DASHBOARD_USER and DASHBOARD_PASSWORD_HASH.
+    Authenticates a dashboard operator or configured administrator.
+    Supports:
+    1. Static administrator configured via DASHBOARD_USER and DASHBOARD_PASSWORD_HASH (admin role)
+    2. Registered operators stored in user_store (operator role)
     Applies IP rate limiting: max 5 failed attempts per IP within a 5-minute rolling window.
     On success, returns an unguessable 32-byte in-memory Bearer session token.
     """
@@ -571,10 +684,27 @@ def login(req: LoginRequest, request: Request):
             detail="Too many failed login attempts. Please try again after 5 minutes.",
         )
 
-    valid_user = bool(DASHBOARD_USER and secrets.compare_digest(req.username, DASHBOARD_USER))
-    valid_pass = bool(DASHBOARD_PASSWORD_HASH and verify_password(req.password, DASHBOARD_PASSWORD_HASH))
+    clean_u = req.username.strip()
+    auth_success = False
+    auth_role = "operator"
+    auth_username = clean_u
 
-    if not (valid_user and valid_pass):
+    # 1. Check configured administrator credentials
+    if DASHBOARD_USER and secrets.compare_digest(clean_u.lower(), DASHBOARD_USER.lower()):
+        if DASHBOARD_PASSWORD_HASH and verify_password(req.password, DASHBOARD_PASSWORD_HASH):
+            auth_success = True
+            auth_role = "admin"
+            auth_username = DASHBOARD_USER
+
+    # 2. Check registered user accounts if not authenticated as admin
+    if not auth_success:
+        user_record = user_store.get_user(clean_u)
+        if user_record and verify_password(req.password, user_record["password_hash"]):
+            auth_success = True
+            auth_role = user_record.get("role", "operator")
+            auth_username = user_record["username"]
+
+    if not auth_success:
         login_rate_limiter.record_failure(client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -583,10 +713,11 @@ def login(req: LoginRequest, request: Request):
         )
 
     login_rate_limiter.record_success(client_ip)
-    token, expires_at = session_store.create_session(req.username)
+    token, expires_at = session_store.create_session(username=auth_username, role=auth_role)
     return LoginResponse(
         token=token,
-        username=req.username,
+        username=auth_username,
+        role=auth_role,
         expires_at=expires_at.isoformat(),
         token_type="Bearer",
     )
@@ -639,7 +770,34 @@ def check_session(
     return SessionCheckResponse(
         valid=True,
         username=session["username"],
+        role=session.get("role", "operator"),
         expires_at=session["expires_at"].isoformat(),
+    )
+
+
+@router.get(
+    "/system",
+    response_model=SystemInfoResponse,
+    summary="System and platform architecture information",
+    tags=["System"],
+)
+def get_system_info():
+    """
+    Returns runtime host system information, architecture (using platform.machine()),
+    and platform environment metadata.
+    """
+    machine_arch = platform.machine() or "unknown"
+    sys_name = platform.system() or "unknown"
+    proc = platform.processor() or machine_arch
+
+    return SystemInfoResponse(
+        machine=machine_arch,
+        system=sys_name,
+        processor=proc,
+        python_version=platform.python_version(),
+        platform_string=f"{sys_name} ({machine_arch})",
+        service="PulseGuard-Z",
+        status="online",
     )
 
 

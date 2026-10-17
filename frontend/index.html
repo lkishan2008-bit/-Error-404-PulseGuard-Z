@@ -25,9 +25,16 @@
     }
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
     html,body{height:100%;width:100%;background:var(--canvas-bg);color:var(--text-body);font-family:var(--font-sans);overflow:hidden;-webkit-font-smoothing:antialiased;}
-    .app{display:flex;height:100vh;width:100vw;overflow:hidden;}
+    .app{display:flex;height:100vh;width:100vw;overflow:hidden;position:relative;}
     /* ---- SIDEBAR ---- */
-    .sidebar{width:var(--sidebar);min-width:var(--sidebar);height:100vh;background:var(--panel-bg);border-right:1px solid var(--border-em);display:flex;flex-direction:column;flex-shrink:0;z-index:25;}
+    .sidebar{width:var(--sidebar);min-width:var(--sidebar);height:100vh;background:var(--panel-bg);border-right:1px solid var(--border-em);display:flex;flex-direction:column;flex-shrink:0;z-index:25;transition:margin-left 0.26s cubic-bezier(0.4, 0, 0.2, 1), transform 0.26s cubic-bezier(0.4, 0, 0.2, 1);}
+    .sidebar.collapsed{margin-left:calc(-1 * var(--sidebar));}
+    .btn-hamburger{background:var(--card-bg);border:1px solid var(--border-em);color:var(--text-heading);width:34px;height:34px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.16s;flex-shrink:0;}
+    .btn-hamburger:hover{border-color:var(--border-bright);color:var(--em-neon);background:var(--card-hover);box-shadow:0 0 10px var(--em-glow-s);}
+    .btn-hamburger svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+    .sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(4px);z-index:24;}
+    .sidebar-backdrop.active{display:block;}
+    .planned-item,#nav-payment,#nav-soc{display:none !important;}
     .sb-brand{padding:18px 18px 14px;border-bottom:1px solid var(--border-subtle);display:flex;flex-direction:column;gap:6px;}
     .brand-row{display:flex;align-items:center;gap:10px;}
     .brand-icon{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,rgba(16,185,129,0.22),rgba(6,78,59,0.4));border:1px solid var(--border-bright);display:flex;align-items:center;justify-content:center;color:var(--em-neon);box-shadow:0 0 14px var(--em-glow-s);flex-shrink:0;}
@@ -178,24 +185,38 @@
     @keyframes sp{to{transform:rotate(360deg);}}
     .errb{position:fixed;top:12px;right:18px;background:#1f0707;border:1px solid var(--risk-border);color:var(--risk-bright);padding:10px 16px;border-radius:6px;font-size:12px;display:none;align-items:center;gap:10px;z-index:200;}
     .errb.visible{display:flex;}
-    /* ---- LOGIN MODAL OVERLAY ---- */
-    .login-overlay{position:fixed;inset:0;background:rgba(3,7,5,0.94);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;z-index:1000;transition:opacity 0.25s ease,visibility 0.25s ease;}
+    /* ---- AUTH & WELCOME SCREEN OVERLAY ---- */
+    .login-overlay{position:fixed;inset:0;background:rgba(3,7,5,0.95);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;z-index:1000;transition:opacity 0.25s ease,visibility 0.25s ease;}
     .login-overlay.hidden{opacity:0;visibility:hidden;pointer-events:none;}
-    .login-card{width:390px;max-width:92vw;background:var(--panel-bg);border:1px solid var(--border-bright);border-radius:12px;padding:28px 24px;box-shadow:0 16px 40px rgba(0,0,0,0.8),0 0 32px var(--em-glow-s);display:flex;flex-direction:column;gap:18px;position:relative;}
+    .login-card{width:420px;max-width:92vw;background:var(--panel-bg);border:1px solid var(--border-bright);border-radius:14px;padding:26px 26px 24px;box-shadow:0 16px 40px rgba(0,0,0,0.85),0 0 36px var(--em-glow-s);display:flex;flex-direction:column;gap:16px;position:relative;}
     .login-card::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent,var(--em-neon),transparent);}
-    .login-header{text-align:center;display:flex;flex-direction:column;gap:8px;}
-    .login-sub{font-size:10px;font-family:var(--font-mono);color:var(--em-bright);letter-spacing:1.5px;font-weight:700;}
-    .login-form{display:flex;flex-direction:column;gap:13px;}
+    .login-header{text-align:center;display:flex;flex-direction:column;gap:6px;}
+    .login-welcome-title{font-size:17px;font-weight:800;color:var(--text-white);letter-spacing:-0.3px;}
+    .login-welcome-title .nz{color:var(--em-neon);text-shadow:0 0 10px rgba(0,255,136,0.6);}
+    .login-sub{font-size:10px;font-family:var(--font-mono);color:var(--em-bright);letter-spacing:1.4px;font-weight:700;}
+    
+    /* Auth Tabs */
+    .auth-tabs{display:grid;grid-template-columns:1fr 1fr;background:rgba(7,13,10,0.9);border:1px solid var(--border-em);border-radius:8px;padding:3px;gap:4px;}
+    .auth-tab{padding:8px;font-size:11px;font-family:var(--font-mono);font-weight:700;color:var(--text-secondary);background:transparent;border:none;border-radius:6px;cursor:pointer;transition:all 0.16s;text-align:center;}
+    .auth-tab:hover{color:var(--text-white);background:rgba(255,255,255,0.04);}
+    .auth-tab.active{color:#030705;background:linear-gradient(135deg,var(--em-neon),var(--em-primary));box-shadow:0 0 12px var(--em-glow-s);}
+
+    .login-form{display:flex;flex-direction:column;gap:12px;}
     .form-group{display:flex;flex-direction:column;gap:5px;}
-    .form-label{font-size:10.5px;font-family:var(--font-mono);font-weight:700;color:var(--text-secondary);letter-spacing:0.8px;}
-    .form-input{background:var(--card-bg);border:1px solid var(--border-em);border-radius:6px;padding:10px 12px;font-size:13px;font-family:var(--font-mono);color:var(--text-white);outline:none;transition:border-color 0.18s,box-shadow 0.18s;}
+    .form-label{font-size:10px;font-family:var(--font-mono);font-weight:700;color:var(--text-secondary);letter-spacing:0.8px;}
+    .form-input{background:var(--card-bg);border:1px solid var(--border-em);border-radius:6px;padding:9px 12px;font-size:12.5px;font-family:var(--font-mono);color:var(--text-white);outline:none;transition:border-color 0.18s,box-shadow 0.18s;}
     .form-input:focus{border-color:var(--em-neon);box-shadow:0 0 10px var(--em-glow-s);}
-    .btn-signin{margin-top:6px;background:linear-gradient(135deg,var(--em-primary),#059669);color:#030705;border:1px solid var(--em-neon);border-radius:6px;padding:11px;font-size:12px;font-family:var(--font-mono);font-weight:800;letter-spacing:1px;cursor:pointer;transition:all 0.18s;display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px var(--em-glow-s);}
+    .form-hint{font-size:9.5px;color:var(--text-dim);font-family:var(--font-mono);}
+    
+    .btn-signin{margin-top:4px;background:linear-gradient(135deg,var(--em-primary),#059669);color:#030705;border:1px solid var(--em-neon);border-radius:6px;padding:10px;font-size:11.5px;font-family:var(--font-mono);font-weight:800;letter-spacing:1px;cursor:pointer;transition:all 0.18s;display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px var(--em-glow-s);}
     .btn-signin:hover:not(:disabled){background:linear-gradient(135deg,var(--em-neon),var(--em-primary));box-shadow:0 0 20px rgba(0,255,136,0.5);transform:translateY(-1px);}
     .btn-signin:disabled{opacity:0.6;cursor:not-allowed;}
-    .login-error-msg{background:var(--risk-bg);border:1px solid var(--risk-border);color:var(--risk-bright);padding:8px 12px;border-radius:6px;font-size:11px;font-family:var(--font-mono);line-height:1.4;}
+    
+    .login-error-msg{background:var(--risk-bg);border:1px solid var(--risk-border);color:var(--risk-bright);padding:8px 12px;border-radius:6px;font-size:10.5px;font-family:var(--font-mono);line-height:1.4;}
     .login-error-msg.hidden{display:none;}
-    .login-security-notice{display:flex;flex-direction:column;gap:3px;text-align:center;font-size:9.5px;color:var(--text-dim);font-family:var(--font-mono);margin-top:4px;}
+    .login-success-msg{background:rgba(16,185,129,0.12);border:1px solid var(--border-bright);color:var(--em-neon);padding:8px 12px;border-radius:6px;font-size:10.5px;font-family:var(--font-mono);line-height:1.4;}
+    .login-success-msg.hidden{display:none;}
+    .login-security-notice{display:flex;flex-direction:column;gap:3px;text-align:center;font-size:9.5px;color:var(--text-dim);font-family:var(--font-mono);margin-top:2px;}
     .btn-logout-ctrl{margin-left:auto;background:rgba(239,68,68,0.12);border:1px solid var(--risk-border);color:var(--risk-bright);font-family:var(--font-mono);font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:pointer;transition:all 0.15s;}
     .btn-logout-ctrl:hover{background:rgba(239,68,68,0.25);border-color:var(--risk-bright);box-shadow:0 0 8px var(--risk-glow);}
 
@@ -295,12 +316,12 @@
         <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
         <span>Transactions</span><span class="nav-badge" style="opacity:0.75;">API ACTIVE</span>
       </div>
-      <div class="nav-item" id="nav-payment" style="opacity:0.6;" title="Demonstration module planned for Part E">
+      <div class="nav-item" id="nav-payment" style="display:none;" title="Demonstration module planned for Part E">
         <svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
         <span>Payment Demo</span><span class="nav-badge" style="opacity:0.6;">PLANNED</span>
       </div>
-      <div class="nav-gl">Operations</div>
-      <div class="nav-item" id="nav-soc" style="opacity:0.6;" title="Enterprise SOC integration planned">
+      <div class="nav-gl" style="display:none;">Operations</div>
+      <div class="nav-item" id="nav-soc" style="display:none;" title="Enterprise SOC integration planned">
         <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
         <span>Cyber Risk SOC</span><span class="nav-badge" style="opacity:0.6;">PLANNED</span>
       </div>
@@ -316,11 +337,14 @@
     <div class="sb-foot">
       <div class="foot-row">
         <span>Operator</span>
-        <span style="font-family:var(--font-mono);color:var(--em-neon);font-weight:700;" id="user-display">anonymous</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-family:var(--font-mono);color:var(--em-neon);font-weight:700;" id="user-display">anonymous</span>
+          <span id="role-badge" class="nav-badge" style="display:none;font-size:9px;padding:1px 5px;">OPERATOR</span>
+        </div>
       </div>
       <div class="foot-row">
         <span>Platform</span>
-        <span style="font-family:var(--font-mono);color:var(--em-bright);">LinuxONE Simulation</span>
+        <span style="font-family:var(--font-mono);color:var(--em-bright);" id="platform-display">Detecting...</span>
       </div>
       <div class="foot-row">
         <span>Model</span>
@@ -332,11 +356,15 @@
       </div>
     </div>
   </aside>
+  <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
 
   <!-- MAIN -->
   <main class="main">
     <header class="mhdr">
       <div class="hl">
+        <button id="btn-sidebar-toggle" class="btn-hamburger" aria-label="Toggle Sidebar" title="Collapse / Expand Sidebar">
+          <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
         <h1 class="pg-title">PulseGuard<span class="ta">-Z</span></h1>
         <span class="pg-sub">TEMPORAL GRAPH NEURAL NETWORK // FLASH FRAUD DETECTION</span>
       </div>
@@ -509,9 +537,9 @@
 <div class="lovo" id="lov"><div class="spin"></div><div style="font-size:12px;font-weight:600;color:var(--text-white);">Loading PulseGuard-Z...</div></div>
 <div class="errb" id="errb"><span id="err-txt">API Disconnected</span><button class="bp" id="btn-retry" style="background:var(--risk-bg);color:var(--risk-bright);border-color:var(--risk-border);">Retry</button></div>
 
-<!-- LOGIN OVERLAY -->
+<!-- WELCOME / AUTH OVERLAY -->
 <div id="login-overlay" class="login-overlay hidden">
-  <div class="login-card" role="dialog" aria-modal="true" aria-labelledby="login-title">
+  <div class="login-card" role="dialog" aria-modal="true" aria-labelledby="login-welcome-title">
     <div class="login-header">
       <div class="brand-row" style="justify-content:center;">
         <div class="brand-icon"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
@@ -520,15 +548,23 @@
           <div class="brand-sub">FRAUD DETECTION SYSTEM</div>
         </div>
       </div>
-      <div class="login-sub" id="login-title">OPERATOR AUTHENTICATION</div>
+      <div class="login-welcome-title" id="login-welcome-title">Welcome to PulseGuard<span class="nz">-Z</span></div>
+      <div class="login-sub">IBM LinuxONE FLASH FRAUD DEFENSE</div>
     </div>
 
+    <!-- Auth Mode Switcher -->
+    <div class="auth-tabs" role="tablist">
+      <button type="button" id="tab-btn-signin" class="auth-tab active" role="tab" aria-selected="true" aria-controls="login-form">SIGN IN</button>
+      <button type="button" id="tab-btn-register" class="auth-tab" role="tab" aria-selected="false" aria-controls="register-form">REGISTER</button>
+    </div>
+
+    <!-- Sign In Form -->
     <form id="login-form" class="login-form" autocomplete="off" onsubmit="return false;">
       <div id="login-error" class="login-error-msg hidden" role="alert"></div>
 
       <div class="form-group">
         <label for="login-username" class="form-label">OPERATOR ID</label>
-        <input type="text" id="login-username" class="form-input" placeholder="e.g. admin" autocomplete="username" required>
+        <input type="text" id="login-username" class="form-input" placeholder="e.g. admin or operator_id" autocomplete="username" required>
       </div>
 
       <div class="form-group">
@@ -544,6 +580,39 @@
       <div class="login-security-notice">
         <span>PBKDF2-HMAC-SHA256 &middot; Constant-Time Verification</span>
         <span>In-Memory Session Token &middot; 30-min TTL</span>
+      </div>
+    </form>
+
+    <!-- Register Form -->
+    <form id="register-form" class="login-form" style="display:none;" autocomplete="off" onsubmit="return false;">
+      <div id="register-error" class="login-error-msg hidden" role="alert"></div>
+      <div id="register-success" class="login-success-msg hidden" role="status"></div>
+
+      <div class="form-group">
+        <label for="reg-username" class="form-label">DESIRED OPERATOR ID</label>
+        <input type="text" id="reg-username" class="form-input" placeholder="e.g. analyst_01" autocomplete="username" required>
+        <span class="form-hint">3–32 characters (letters, numbers, _, -)</span>
+      </div>
+
+      <div class="form-group">
+        <label for="reg-password" class="form-label">PASSWORD</label>
+        <input type="password" id="reg-password" class="form-input" placeholder="••••••••••••" autocomplete="new-password" required>
+        <span class="form-hint">Minimum 8 characters (at least 1 letter & 1 number)</span>
+      </div>
+
+      <div class="form-group">
+        <label for="reg-confirm-password" class="form-label">CONFIRM PASSWORD</label>
+        <input type="password" id="reg-confirm-password" class="form-input" placeholder="••••••••••••" autocomplete="new-password" required>
+      </div>
+
+      <button type="submit" id="btn-register" class="btn-signin">
+        <span id="btn-register-txt">CREATE OPERATOR ACCOUNT</span>
+        <div id="btn-register-spin" class="spin hidden" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-left:6px;"></div>
+      </button>
+
+      <div class="login-security-notice">
+        <span style="color:var(--em-bright);font-weight:600;">Role: Operator (Fraud Monitoring & CSV Screening)</span>
+        <span>Administrator accounts cannot be registered from this interface.</span>
       </div>
     </form>
   </div>
@@ -643,11 +712,21 @@ const pOpt=E("preset-opt"),pBroad=E("preset-broad"),pStrict=E("preset-strict");
 const ntip=E("ntip"),alertsGrid=E("alerts-grid"),gbadge=E("graph-badge");
 const invEmpty=E("inv-empty"),invDet=E("inv-det"),btnClr=E("btn-clr");
 
-// Auth DOM elements
+// Auth & Registration DOM elements
 const loginOverlay=E("login-overlay"),loginForm=E("login-form");
 const loginUser=E("login-username"),loginPass=E("login-password");
 const btnLogin=E("btn-login"),btnLoginTxt=E("btn-login-txt"),btnLoginSpin=E("btn-login-spin");
 const loginErr=E("login-error"),btnLogout=E("btn-logout"),userDisp=E("user-display");
+const roleBadge=E("role-badge"),platformDisp=E("platform-display");
+
+const tabBtnSignin=E("tab-btn-signin"),tabBtnRegister=E("tab-btn-register");
+const registerForm=E("register-form"),regUser=E("reg-username");
+const regPass=E("reg-password"),regPassConf=E("reg-confirm-password");
+const btnRegister=E("btn-register"),btnRegisterTxt=E("btn-register-txt"),btnRegisterSpin=E("btn-register-spin");
+const regErr=E("register-error"),regSucc=E("register-success");
+
+const btnSidebarToggle=E("btn-sidebar-toggle"),sidebarEl=document.querySelector(".sidebar"),sidebarBackdrop=E("sidebar-backdrop");
+let currentRole="operator";
 
 // CSV Upload DOM elements
 const uploadModal=E("upload-modal"),btnOpenUpload=E("btn-open-upload");
@@ -681,6 +760,7 @@ async function api(ep,opts={}){
       sessionToken=null;
       currentUsername=null;
       userDisp.textContent="expired";
+      if(roleBadge)roleBadge.style.display="none";
       btnLogout.style.display="none";
       showLogin("Session expired or invalid. Please sign in again.");
     }
@@ -696,8 +776,34 @@ async function api(ep,opts={}){
 function showErr(m){errb.classList.add("visible");errtxt.textContent="API Error: "+m;}
 function hideErr(){errb.classList.remove("visible");}
 
+function switchAuthTab(mode){
+  if(mode==="register"){
+    tabBtnRegister.classList.add("active");
+    tabBtnRegister.setAttribute("aria-selected","true");
+    tabBtnSignin.classList.remove("active");
+    tabBtnSignin.setAttribute("aria-selected","false");
+    loginForm.style.display="none";
+    registerForm.style.display="flex";
+    regErr.classList.add("hidden");
+    regSucc.classList.add("hidden");
+    regErr.textContent="";
+    regSucc.textContent="";
+    setTimeout(()=>regUser&&regUser.focus(),100);
+  }else{
+    tabBtnSignin.classList.add("active");
+    tabBtnSignin.setAttribute("aria-selected","true");
+    tabBtnRegister.classList.remove("active");
+    tabBtnRegister.setAttribute("aria-selected","false");
+    registerForm.style.display="none";
+    loginForm.style.display="flex";
+    loginErr.classList.add("hidden");
+    setTimeout(()=>loginUser&&loginUser.focus(),100);
+  }
+}
+
 function showLogin(msg){
   loginOverlay.classList.remove("hidden");
+  switchAuthTab("signin");
   if(msg){
     loginErr.textContent=msg;
     loginErr.classList.remove("hidden");
@@ -712,6 +818,8 @@ function showLogin(msg){
 function hideLogin(){
   loginOverlay.classList.add("hidden");
   loginErr.classList.add("hidden");
+  regErr.classList.add("hidden");
+  regSucc.classList.add("hidden");
 }
 
 async function handleLogin(e){
@@ -740,11 +848,26 @@ async function handleLogin(e){
     // Success: store token strictly in JS memory
     sessionToken=data.token;
     currentUsername=data.username||u;
+    currentRole=data.role||"operator";
     userDisp.textContent=currentUsername;
+    if(roleBadge){
+      roleBadge.textContent=currentRole.toUpperCase();
+      roleBadge.style.display="inline-block";
+      if(currentRole==="admin"){
+        roleBadge.style.background="rgba(0,255,136,0.2)";
+        roleBadge.style.color="var(--em-neon)";
+        roleBadge.style.borderColor="var(--em-neon)";
+      }else{
+        roleBadge.style.background="rgba(16,185,129,0.12)";
+        roleBadge.style.color="var(--em-bright)";
+        roleBadge.style.borderColor="var(--border-em)";
+      }
+    }
     btnLogout.style.display="inline-block";
     hideLogin();
     applyThresh(0.81);
     checkUploadStatus();
+    loadSystemPlatform();
   }catch(err){
     loginErr.textContent=err.message||"Login failed. Please check your credentials.";
     loginErr.classList.remove("hidden");
@@ -753,6 +876,67 @@ async function handleLogin(e){
     btnLogin.disabled=false;
     btnLoginTxt.textContent="SIGN IN";
     btnLoginSpin.classList.add("hidden");
+  }
+}
+
+async function handleRegister(e){
+  if(e&&e.preventDefault)e.preventDefault();
+  const u=regUser.value.trim(),p=regPass.value,pc=regPassConf.value;
+  regErr.classList.add("hidden");
+  regSucc.classList.add("hidden");
+
+  if(!u||!p||!pc){
+    regErr.textContent="All registration fields are required.";
+    regErr.classList.remove("hidden");
+    return;
+  }
+  if(u.length<3||u.length>32){
+    regErr.textContent="Operator ID must be between 3 and 32 characters.";
+    regErr.classList.remove("hidden");
+    return;
+  }
+  if(p.length<8){
+    regErr.textContent="Password must be at least 8 characters long.";
+    regErr.classList.remove("hidden");
+    return;
+  }
+  if(p!==pc){
+    regErr.textContent="Passwords do not match.";
+    regErr.classList.remove("hidden");
+    return;
+  }
+
+  btnRegister.disabled=true;
+  btnRegisterTxt.textContent="REGISTERING...";
+  btnRegisterSpin.classList.remove("hidden");
+
+  try{
+    const res=await fetch(`${API}/auth/register`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Accept":"application/json"},
+      body:JSON.stringify({username:u,password:p})
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){
+      throw new Error(data.detail||`Registration failed (HTTP ${res.status})`);
+    }
+    regSucc.textContent="Operator account registered! Switching to sign in...";
+    regSucc.classList.remove("hidden");
+    regPass.value="";
+    regPassConf.value="";
+    setTimeout(()=>{
+      switchAuthTab("signin");
+      loginUser.value=u;
+      loginPass.value="";
+      loginPass.focus();
+    },1200);
+  }catch(err){
+    regErr.textContent=err.message||"Registration failed. Please check input requirements.";
+    regErr.classList.remove("hidden");
+  }finally{
+    btnRegister.disabled=false;
+    btnRegisterTxt.textContent="CREATE OPERATOR ACCOUNT";
+    btnRegisterSpin.classList.add("hidden");
   }
 }
 
@@ -767,14 +951,30 @@ async function handleLogout(){
   }
   sessionToken=null;
   currentUsername=null;
+  currentRole="operator";
   userDisp.textContent="unauthenticated";
+  if(roleBadge)roleBadge.style.display="none";
   btnLogout.style.display="none";
   clearSel();
   setDemoActiveUI();
   showLogin("Signed out successfully.");
 }
 
+async function loadSystemPlatform(){
+  try{
+    const s=await fetch(`${API}/system`,{headers:{"Accept":"application/json"}}).then(r=>r.json());
+    if(platformDisp&&s&&s.machine){
+      platformDisp.textContent=`LinuxONE (${s.machine})`;
+      platformDisp.title=`Host: ${s.system} · Machine: ${s.machine} · Architecture: ${s.processor}`;
+    }
+  }catch(err){
+    console.warn("Could not load platform info",err);
+    if(platformDisp)platformDisp.textContent="LinuxONE Simulation";
+  }
+}
+
 async function checkAuthAndInit(){
+  loadSystemPlatform();
   try{
     const st=await fetch(`${API}/auth/status`,{headers:{"Accept":"application/json"}}).then(r=>r.json());
     authConfig=st||{};
@@ -783,6 +983,10 @@ async function checkAuthAndInit(){
       lov.classList.add("hidden");
     }else{
       userDisp.textContent="dev-operator";
+      if(roleBadge){
+        roleBadge.textContent="DEV-MODE";
+        roleBadge.style.display="inline-block";
+      }
       hideLogin();
       applyThresh(0.81);
       checkUploadStatus();
@@ -1121,12 +1325,25 @@ function initCy(els){
     ntip.appendChild(tId);ntip.appendChild(tType);ntip.appendChild(tScore);ntip.appendChild(tFlag);
   });
   cy.on("mouseout","node",()=>{ntip.style.display="none";});
+  
+  // Fix graph clipping: observe container size changes to dynamically resize Cytoscape
+  if(window.ResizeObserver && E("cy")){
+    const ro = new ResizeObserver(()=>{
+      if(cy){
+        cy.resize();
+      }
+    });
+    ro.observe(E("cy"));
+  }
+  
   runLayout();
 }
 
 function runLayout(){
   if(!cy)return;
-  cy.layout({name:"cose",animate:true,animationDuration:600,randomize:false,componentSpacing:60,nodeOverlap:20,idealEdgeLength:60,edgeElasticity:100,nestingFactor:5,gravity:80,numIter:300,initialTemp:200,coolingFactor:0.95,fit:true,padding:24}).run();
+  cy.resize();
+  cy.layout({name:"cose",animate:true,animationDuration:500,randomize:false,componentSpacing:60,nodeOverlap:20,idealEdgeLength:60,edgeElasticity:100,nestingFactor:5,gravity:80,numIter:300,initialTemp:200,coolingFactor:0.95,fit:true,padding:28}).run();
+  setTimeout(()=>{if(cy)cy.fit(null,28);},520);
 }
 
 function focusNode(id){
@@ -1276,9 +1493,47 @@ E("btn-zo").addEventListener("click",()=>{if(cy)cy.zoom(cy.zoom()*0.8);});
 E("btn-fit").addEventListener("click",()=>{if(cy)cy.fit(null,24);});
 E("btn-rl").addEventListener("click",runLayout);
 
-// Auth listeners
+// Auth & Registration listeners
 loginForm.addEventListener("submit",handleLogin);
 btnLogout.addEventListener("click",handleLogout);
+if(tabBtnSignin)tabBtnSignin.addEventListener("click",()=>switchAuthTab("signin"));
+if(tabBtnRegister)tabBtnRegister.addEventListener("click",()=>switchAuthTab("register"));
+if(registerForm)registerForm.addEventListener("submit",handleRegister);
+
+// Responsive Collapsible Sidebar
+if(btnSidebarToggle){
+  btnSidebarToggle.addEventListener("click",()=>{
+    if(window.innerWidth<=960){
+      sidebarEl.classList.toggle("mobile-open");
+      if(sidebarBackdrop)sidebarBackdrop.classList.toggle("active",sidebarEl.classList.contains("mobile-open"));
+    }else{
+      sidebarEl.classList.toggle("collapsed");
+    }
+    setTimeout(()=>{
+      if(cy){
+        cy.resize();
+        cy.fit(null,24);
+      }
+    },280);
+  });
+}
+if(sidebarBackdrop){
+  sidebarBackdrop.addEventListener("click",()=>{
+    sidebarEl.classList.remove("mobile-open");
+    sidebarBackdrop.classList.remove("active");
+    setTimeout(()=>{if(cy){cy.resize();cy.fit(null,24);}},280);
+  });
+}
+let winResizeTimer;
+window.addEventListener("resize",()=>{
+  clearTimeout(winResizeTimer);
+  winResizeTimer=setTimeout(()=>{
+    if(cy){
+      cy.resize();
+      cy.fit(null,24);
+    }
+  },150);
+});
 
 // Upload Modal listeners
 btnOpenUpload.addEventListener("click",openUploadModal);

@@ -127,7 +127,7 @@ class SessionStore:
         self._lock = threading.Lock()
 
     def create_session(
-        self, username: str, ttl_minutes: int = SESSION_TTL_MINUTES
+        self, username: str, role: str = "operator", ttl_minutes: int = SESSION_TTL_MINUTES
     ) -> Tuple[str, datetime]:
         token = secrets.token_urlsafe(32)
         now = datetime.now(timezone.utc)
@@ -141,6 +141,7 @@ class SessionStore:
 
             self._sessions[token] = {
                 "username": username,
+                "role": role,
                 "expires_at": expires_at,
                 "created_at": now,
             }
@@ -156,7 +157,7 @@ class SessionStore:
             if datetime.now(timezone.utc) > session["expires_at"]:
                 self._sessions.pop(token, None)
                 return None
-            return session
+            return dict(session)
 
     def revoke_session(self, token: str) -> bool:
         if not token:
@@ -171,6 +172,60 @@ class SessionStore:
 
 
 session_store = SessionStore()
+
+
+# ---------------------------------------------------------------------------
+# In-Memory Registered User Store (Non-Admin Operators)
+# ---------------------------------------------------------------------------
+class UserStore:
+    """
+    Thread-safe in-memory store for registered users.
+    Strictly guarantees that newly registered users are NEVER given administrator privileges.
+    """
+
+    def __init__(self):
+        self._users: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.Lock()
+
+    def user_exists(self, username: str) -> bool:
+        normalized = username.strip().lower()
+        with self._lock:
+            return normalized in self._users
+
+    def create_user(
+        self, username: str, password_hash: str, role: str = "operator"
+    ) -> Dict[str, Any]:
+        """
+        Creates a new operator user record.
+        Defense in depth: explicitly forbids assigning administrator role to newly registered users.
+        """
+        assigned_role = "operator" if role != "admin" else "operator"
+        clean_name = username.strip()
+        normalized = clean_name.lower()
+        now = datetime.now(timezone.utc).isoformat()
+
+        user_record = {
+            "username": clean_name,
+            "password_hash": password_hash,
+            "role": assigned_role,
+            "created_at": now,
+        }
+        with self._lock:
+            self._users[normalized] = user_record
+        return user_record
+
+    def get_user(self, username: str) -> Optional[Dict[str, Any]]:
+        normalized = username.strip().lower()
+        with self._lock:
+            user = self._users.get(normalized)
+            return dict(user) if user else None
+
+    def list_usernames(self) -> List[str]:
+        with self._lock:
+            return [u["username"] for u in self._users.values()]
+
+
+user_store = UserStore()
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +273,8 @@ def is_auth_enabled() -> bool:
     """
     Returns True if authentication is actively enforced.
     Auth is enforced if REQUIRE_API_KEY is true, or if valid API_KEY is set,
-    or if DASHBOARD_USER and DASHBOARD_PASSWORD_HASH are configured.
+    or if DASHBOARD_USER and DASHBOARD_PASSWORD_HASH are configured,
+    or if any registered users exist in user_store.
     """
     if REQUIRE_API_KEY_ENV in {"1", "true", "yes"}:
         return True
@@ -226,7 +282,8 @@ def is_auth_enabled() -> bool:
     has_dashboard_auth = bool(
         DASHBOARD_USER and DASHBOARD_PASSWORD_HASH and DASHBOARD_PASSWORD_HASH not in PLACEHOLDERS
     )
-    return has_api_key or has_dashboard_auth
+    has_registered_users = bool(user_store.list_usernames())
+    return has_api_key or has_dashboard_auth or has_registered_users
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +357,8 @@ def verify_api_key(
     if credential:
         session = session_store.get_session(credential)
         if session:
-            return f"session:{session['username']}"
+            role = session.get("role", "operator")
+            return f"session:{session['username']}:{role}"
 
     # 2. Check if credential matches the configured static API key
     if credential and CONFIGURED_API_KEY and CONFIGURED_API_KEY not in PLACEHOLDERS:
@@ -341,6 +399,7 @@ def get_auth_status() -> dict:
         "mode": "enforced" if enabled else "development_open",
         "api_key_configured": has_api_key,
         "dashboard_user_configured": has_dashboard,
+        "registered_users_count": len(user_store.list_usernames()),
         "session_ttl_minutes": SESSION_TTL_MINUTES,
         "active_sessions": session_store.active_sessions_count(),
         "rate_limiting": "5 failures per 5 minutes per IP",
