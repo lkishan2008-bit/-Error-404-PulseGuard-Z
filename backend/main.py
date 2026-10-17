@@ -324,6 +324,7 @@ class DashboardSummaryResponse(BaseModel):
     top_risk_signals_frequency: Dict[str, int]
     threshold_applied: float
     data_fidelity_notice: str
+    is_uploaded: bool = False
 
 
 class TransactionItem(BaseModel):
@@ -472,9 +473,11 @@ class UploadResponse(BaseModel):
     total_volume: float
     average_transaction_amount: float
     simulation_window: Dict[str, Optional[str]]
+    time_windows: int
     flagged_accounts_at_threshold: int
     threshold_used: float
     expires_in_minutes: int
+    expires_in_seconds: int
     notice: str
 
 
@@ -484,8 +487,10 @@ class UploadStatusResponse(BaseModel):
     total_accounts: Optional[int] = None
     total_transactions: Optional[int] = None
     total_volume: Optional[float] = None
+    time_windows: Optional[int] = None
     expires_at: Optional[str] = None
     seconds_remaining: Optional[int] = None
+    expires_in_seconds: Optional[int] = None
     active_mode: str
     notice: str
 
@@ -493,32 +498,34 @@ class UploadStatusResponse(BaseModel):
 def resolve_session_id(request: Request, credential: Optional[str] = None) -> str:
     """
     Safely resolves a unique session isolation identifier for per-user upload segregation.
-    Ensures that uploaded datasets and metrics never leak between different operators or judges.
+    Ensures that uploaded datasets and metrics never leak between different operators, browser tabs, or sessions.
+    Prioritizes explicit client session header so each browser session/tab is strictly isolated.
     """
-    # 1. Bearer session token
+    # 1. Explicit client session tracking header (per browser session/tab)
+    client_sid = request.headers.get("x-session-id", "").strip()
+    if client_sid:
+        return f"client:{client_sid}"
+
+    # 2. Bearer session token
     auth_header = request.headers.get("authorization", "").strip()
     if auth_header.lower().startswith("bearer "):
         token = auth_header[7:].strip()
         if token:
             return f"bearer:{token}"
 
-    # 2. X-API-Key header
+    # 3. X-API-Key header
     api_key_header = request.headers.get("x-api-key", "").strip()
     if api_key_header:
         return f"apikey:{api_key_header}"
-
-    # 3. Explicit client session tracking header (for dev mode isolation between browser tabs)
-    client_sid = request.headers.get("x-session-id", "").strip()
-    if client_sid:
-        return f"client:{client_sid}"
 
     # 4. Auth credential string if provided by verify_api_key
     if credential and not credential.startswith("dev-mode"):
         return f"cred:{credential}"
 
-    # 5. Client IP fallback for open dev mode
-    client_ip = get_client_ip(request)
-    return f"ip:{client_ip}"
+    # 5. Anonymous demo session fallback:
+    # We NEVER use client IP as a shared bucket for uploads, because multiple browser sessions
+    # sharing an IP (e.g. localhost) would collide and leak upload state!
+    return "anonymous_demo_session"
 
 
 # ---------------------------------------------------------------------------
@@ -835,6 +842,8 @@ async def upload_csv(
             raw_fn = parts[1].split(";")[0].strip('"\' ')
             if raw_fn:
                 filename = raw_fn
+    elif request.headers.get("x-filename"):
+        filename = request.headers.get("x-filename", "").strip()
 
     try:
         dataset = process_uploaded_csv(session_id, body_bytes, filename=filename)
@@ -859,9 +868,11 @@ async def upload_csv(
         total_volume=dataset.summary["total_volume"],
         average_transaction_amount=dataset.summary["average_transaction_amount"],
         simulation_window=dataset.summary["simulation_window"],
+        time_windows=dataset.summary.get("time_windows", 1),
         flagged_accounts_at_threshold=flagged_count,
         threshold_used=DEFAULT_RISK_THRESHOLD,
         expires_in_minutes=UPLOAD_TTL_MINUTES,
+        expires_in_seconds=UPLOAD_TTL_MINUTES * 60,
         notice=dataset.summary["notice"],
     )
 
@@ -933,20 +944,24 @@ def get_upload_status(
             total_accounts=dataset.summary.get("total_accounts"),
             total_transactions=dataset.summary.get("total_transactions"),
             total_volume=dataset.summary.get("total_volume"),
+            time_windows=dataset.summary.get("time_windows", 1),
             expires_at=dataset.expires_at.isoformat(),
             seconds_remaining=rem_sec,
+            expires_in_seconds=rem_sec,
             active_mode="custom_upload",
             notice=dataset.summary.get("notice", ""),
         )
 
     return UploadStatusResponse(
         is_uploaded=False,
-        dataset_name="synthetic_g2p_benchmark",
+        dataset_name="DEMO (G2P)",
         total_accounts=len(repo.accounts_df) if repo.accounts_df is not None else 2000,
         total_transactions=len(repo.transactions_df) if repo.transactions_df is not None else 50000,
         total_volume=repo.dataset_summary_cache.get("total_volume") if repo.dataset_summary_cache else 0.0,
+        time_windows=144,
         expires_at=None,
         seconds_remaining=None,
+        expires_in_seconds=None,
         active_mode="default_demo",
         notice="Displaying default synthetic G2P demo dataset (SSF2026).",
     )
@@ -982,13 +997,13 @@ def get_dashboard_summary(
     if uploaded_ds:
         m_df = uploaded_ds.merged_accounts_df
         txns = uploaded_ds.transactions_df
-        ds_summary = uploaded_ds.summary
+        ds_summary = dict(uploaded_ds.summary)
         is_uploaded = True
     else:
         repo.ensure_ready()
         m_df = repo.merged_accounts_df
         txns = repo.transactions_df
-        ds_summary = repo.dataset_summary_cache
+        ds_summary = dict(repo.dataset_summary_cache)
         is_uploaded = False
 
     # Evaluate against threshold
@@ -998,6 +1013,44 @@ def get_dashboard_summary(
     tgnn_only_mask = suspicious_mask & (~rule_mask)
 
     scores_series = m_df["tgnn_score"]
+    suspicious_count = int(suspicious_mask.sum())
+    flagged_account_ids = set(m_df.loc[suspicious_mask, "account_id"].tolist())
+
+    if is_uploaded:
+        total_vol = float(ds_summary.get("total_volume", 0.0))
+        if suspicious_count == 0 or len(flagged_account_ids) == 0:
+            money_at_risk = None
+            money_at_risk_display = "n/a"
+            flagged_flows_count = 0
+            ds_summary["fraud_volume"] = 0.0
+            ds_summary["money_at_risk"] = None
+            ds_summary["money_at_risk_display"] = "n/a"
+            ds_summary["money_at_risk_pct"] = 0.0
+            ds_summary["flagged_flows_count"] = 0
+        else:
+            # Computed ONLY from the uploaded flows of flagged accounts:
+            # Any transaction where sender or receiver is among the flagged accounts
+            flagged_tx_mask = txns["sender_id"].isin(flagged_account_ids) | txns["receiver_id"].isin(flagged_account_ids)
+            computed_flow = float(txns.loc[flagged_tx_mask, "amount"].sum())
+            # Strictly never exceed upload total
+            money_at_risk = round(min(computed_flow, total_vol), 2)
+            flagged_flows_count = int(flagged_tx_mask.sum())
+            pct = round((money_at_risk / total_vol * 100), 2) if total_vol > 0 else 0.0
+            money_at_risk_display = f"₹{money_at_risk:,.2f}"
+
+            ds_summary["fraud_volume"] = money_at_risk
+            ds_summary["money_at_risk"] = money_at_risk
+            ds_summary["money_at_risk_display"] = money_at_risk_display
+            ds_summary["money_at_risk_pct"] = pct
+            ds_summary["flagged_flows_count"] = flagged_flows_count
+        ds_summary["time_windows"] = uploaded_ds.summary.get("time_windows", 1)
+        ds_summary["is_uploaded"] = True
+    else:
+        money_at_risk = float(ds_summary.get("fraud_volume", 3029456.92))
+        money_at_risk_display = f"₹{money_at_risk:,.2f}"
+        flagged_flows_count = int(ds_summary.get("fraud_transactions_count", 1800))
+        ds_summary["time_windows"] = 144
+        ds_summary["is_uploaded"] = False
 
     # Score distribution buckets
     bucket_defs = [
@@ -1040,10 +1093,13 @@ def get_dashboard_summary(
 
     risk_summary = {
         "threshold_applied": threshold,
-        "suspicious_accounts_count": int(suspicious_mask.sum()),
+        "suspicious_accounts_count": suspicious_count,
         "rule_flagged_accounts_count": int(rule_mask.sum()),
         "dual_flagged_count": int(dual_mask.sum()),
         "tgnn_only_flagged_count": int(tgnn_only_mask.sum()),
+        "money_at_risk": money_at_risk,
+        "money_at_risk_display": money_at_risk_display,
+        "flagged_flows_count": flagged_flows_count,
         "score_statistics": {
             "min": round(float(scores_series.min()), 4) if len(scores_series) > 0 else 0.0,
             "max": round(float(scores_series.max()), 4) if len(scores_series) > 0 else 0.0,
@@ -1070,6 +1126,7 @@ def get_dashboard_summary(
         top_risk_signals_frequency=sorted_signals,
         threshold_applied=threshold,
         data_fidelity_notice=fidelity_notice,
+        is_uploaded=is_uploaded,
     )
 
 

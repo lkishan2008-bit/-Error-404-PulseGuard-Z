@@ -582,6 +582,11 @@ def process_uploaded_csv(
     ts_min = txn_df["timestamp"].min().strftime("%Y-%m-%d %H:%M:%S")
     ts_max = txn_df["timestamp"].max().strftime("%Y-%m-%d %H:%M:%S")
 
+    # Real time windows count for the uploaded sequence
+    window_td = pd.Timedelta(minutes=WINDOW_MINUTES)
+    window_indices = ((txn_df["timestamp"] - txn_df["timestamp"].min()) // window_td).astype(int).values
+    n_windows = max(1, int(window_indices.max()) + 1)
+
     # Format timestamps as strings matching standard transaction schema
     txn_df["timestamp"] = txn_df["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -593,6 +598,8 @@ def process_uploaded_csv(
         "total_transactions": total_tx,
         "total_volume": round(total_vol, 2),
         "average_transaction_amount": round(total_vol / total_tx, 2) if total_tx > 0 else 0.0,
+        "time_windows": n_windows,
+        "time_windows_count": n_windows,
         "fraud_transactions_count": 0,  # Explicitly unlabeled
         "fraud_transaction_pct": 0.0,
         "fraud_volume": 0.0,

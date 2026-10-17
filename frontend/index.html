@@ -223,6 +223,7 @@
     /* ---- DATASET PILL & UPLOAD STYLES ---- */
     .dataset-pill{display:flex;align-items:center;gap:6px;background:var(--card-bg);border:1px solid var(--border-em);padding:4px 8px;border-radius:6px;font-size:11px;color:var(--text-secondary);font-family:var(--font-mono);}
     .dataset-pill.uploaded{border-color:var(--em-neon);box-shadow:0 0 10px var(--em-glow-s);background:rgba(16,185,129,0.06);}
+    #dataset-mode-txt{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle;font-weight:700;}
     .d-dot{width:7px;height:7px;border-radius:50%;background:var(--em-bright);box-shadow:0 0 6px var(--em-bright);}
     .d-dot.custom{background:var(--em-neon);box-shadow:0 0 8px var(--em-neon);animation:pdot 1.8s infinite;}
     .bact-mini{background:rgba(16,185,129,0.12);border:1px solid var(--border-bright);color:var(--em-neon);font-family:var(--font-mono);font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;cursor:pointer;transition:all 0.15s;}
@@ -411,7 +412,7 @@
           <div class="mi">
             <span class="ml">Transactions Analysed</span>
             <span class="mv" id="val-tx">50,000</span>
-            <span class="ms">144 Time Windows &middot; G2P Transfers</span>
+            <span class="ms" id="desc-tx">144 Time Windows &middot; G2P Transfers</span>
           </div>
           <div class="mic"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
         </div>
@@ -427,7 +428,7 @@
           <div class="mi">
             <span class="ml">Money at Risk</span>
             <span class="mv" id="val-money">&#8377;30,29,456.92</span>
-            <span class="ms">0.60% of G2P Welfare Outlays</span>
+            <span class="ms" id="desc-money">0.60% of G2P Welfare Outlays</span>
           </div>
           <div class="mic"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
         </div>
@@ -1061,7 +1062,9 @@ async function handleUploadSubmit(){
   try{
     const headers={
       "Content-Type":"text/csv",
-      "X-Session-ID":clientSessionId
+      "X-Session-ID":clientSessionId,
+      "X-Filename":selectedUploadFile.name,
+      "Content-Disposition":`attachment; filename="${selectedUploadFile.name}"`
     };
     if(sessionToken){
       headers["Authorization"]=`Bearer ${sessionToken}`;
@@ -1125,16 +1128,24 @@ function setUploadActiveUI(data,filename){
   isUploadActive=true;
   datasetPill.classList.add("uploaded");
   datasetDot.classList.add("custom");
-  datasetModeTxt.textContent="UPLOADED CSV";
+
+  const fn=filename||(data&&(data.dataset_name||data.filename))||(data&&data.dataset_summary&&(data.dataset_summary.dataset_name||data.dataset_summary.filename))||"transactions.csv";
+  datasetModeTxt.textContent=`UPLOADED: ${fn}`;
+  datasetModeTxt.title=`UPLOADED: ${fn}`;
+
   btnReturnDemo.style.display="inline-block";
   uploadActiveBanner.style.display="flex";
 
-  const fn=filename||data.filename||"custom_upload.csv";
-  const txCount=data.total_transactions||(data.dataset_summary&&data.dataset_summary.total_transactions)||0;
-  const acctCount=data.total_accounts||(data.dataset_summary&&data.dataset_summary.total_accounts)||0;
+  const txCount=(data&&data.total_transactions)||(data&&data.dataset_summary&&data.dataset_summary.total_transactions)||0;
+  const acctCount=(data&&data.total_accounts)||(data&&data.dataset_summary&&data.dataset_summary.total_accounts)||0;
   uabText.textContent=`${fn} · ${fnum(txCount)} txns · ${fnum(acctCount)} accounts`;
 
-  uploadExpirySeconds=data.expires_in_seconds||1800;
+  const tw=(data&&(data.time_windows||data.time_windows_count))||(data&&data.dataset_summary&&(data.dataset_summary.time_windows||data.dataset_summary.time_windows_count));
+  if(tw&&E("desc-tx")){
+    E("desc-tx").textContent=`${tw} Time Window${tw===1?'':'s'} · Uploaded Flows`;
+  }
+
+  uploadExpirySeconds=(data&&(data.seconds_remaining||data.expires_in_seconds))||1800;
   updateExpiryDisplay();
   if(uploadExpiryInterval)clearInterval(uploadExpiryInterval);
   uploadExpiryInterval=setInterval(()=>{
@@ -1158,8 +1169,11 @@ function setDemoActiveUI(){
   datasetPill.classList.remove("uploaded");
   datasetDot.classList.remove("custom");
   datasetModeTxt.textContent="DEMO (G2P)";
+  datasetModeTxt.title="DEMO (G2P)";
   btnReturnDemo.style.display="none";
   uploadActiveBanner.style.display="none";
+  if(E("desc-tx"))E("desc-tx").textContent="144 Time Windows · G2P Transfers";
+  if(E("desc-money"))E("desc-money").textContent="0.60% of G2P Welfare Outlays";
 }
 
 function updateExpiryDisplay(){
@@ -1171,13 +1185,21 @@ function updateExpiryDisplay(){
 async function checkUploadStatus(){
   try{
     const st=await api("/upload/status");
-    if(st&&st.is_uploaded_data){
-      if(!isUploadActive||Math.abs(uploadExpirySeconds-st.expires_in_seconds)>10){
-        setUploadActiveUI(st,st.filename);
+    if(st&&(st.is_uploaded||st.is_uploaded_data)){
+      const fn=st.dataset_name||st.filename||"transactions.csv";
+      datasetModeTxt.textContent=`UPLOADED: ${fn}`;
+      datasetModeTxt.title=`UPLOADED: ${fn}`;
+      if(!isUploadActive||Math.abs(uploadExpirySeconds-(st.seconds_remaining||st.expires_in_seconds||0))>10){
+        setUploadActiveUI(st,fn);
       }
-    }else if(isUploadActive){
-      setDemoActiveUI();
-      loadMetrics();loadAlerts();loadGraph();
+    }else{
+      if(isUploadActive){
+        setDemoActiveUI();
+        await Promise.all([loadMetrics(),loadAlerts(),loadGraph()]);
+      }else{
+        datasetModeTxt.textContent="DEMO (G2P)";
+        datasetModeTxt.title="DEMO (G2P)";
+      }
     }
   }catch(err){/* ignore status polling */}
 }
@@ -1186,17 +1208,50 @@ async function loadMetrics(){
   try{
     const d=await api(`/dashboard/summary?threshold=${thresh}`);
     const ds=d.dataset_summary||{},rs=d.risk_summary||{};
-    E("val-tx").textContent=fnum(ds.total_transactions||50000);
-    const fc=rs.suspicious_accounts_count!==undefined?rs.suspicious_accounts_count:82;
+    const isUp=Boolean(d.is_uploaded||ds.is_uploaded||isUploadActive);
+
+    E("val-tx").textContent=fnum(ds.total_transactions||(isUp?0:50000));
+
+    // Time windows: real count for upload, 144 for demo
+    if(isUp){
+      const tw=ds.time_windows||ds.time_windows_count||1;
+      E("desc-tx").textContent=`${tw} Time Window${tw===1?'':'s'} · Uploaded Flows`;
+    }else{
+      E("desc-tx").textContent="144 Time Windows · G2P Transfers";
+    }
+
+    const fc=rs.suspicious_accounts_count!==undefined?rs.suspicious_accounts_count:(isUp?0:82);
     E("val-acct").textContent=fnum(fc);
     E("nav-badge-mules").textContent=fnum(fc);
     E("desc-acct").textContent=`τ = ${thresh.toFixed(2)} · Compliance Priority`;
-    const fv=ds.fraud_volume!==undefined?ds.fraud_volume:3029456.92;
-    E("val-money").textContent=inr(fv);
-    
-    if(d.is_uploaded_data||d.dataset_mode==="uploaded"){
-      setUploadActiveUI(d);
-    }else if(isUploadActive){
+
+    // Money at Risk: computed only from uploaded flows of flagged accounts, never exceed upload total, show "n/a" when nothing flagged, remove demo figure
+    if(isUp){
+      if(fc===0){
+        E("val-money").textContent="n/a";
+        E("desc-money").textContent=`No accounts flagged at τ = ${thresh.toFixed(2)}`;
+      }else{
+        const mar=rs.money_at_risk!==undefined&&rs.money_at_risk!==null?rs.money_at_risk:(ds.money_at_risk!==undefined&&ds.money_at_risk!==null?ds.money_at_risk:ds.fraud_volume);
+        if(mar!==null&&mar!==undefined&&!isNaN(Number(mar))&&Number(mar)>0){
+          E("val-money").textContent=inr(mar);
+          const pct=ds.money_at_risk_pct!==undefined?ds.money_at_risk_pct:(ds.total_volume?((mar/ds.total_volume)*100).toFixed(2):"0.00");
+          const flowCount=rs.flagged_flows_count||ds.flagged_flows_count;
+          E("desc-money").textContent=`${pct}% of upload total${flowCount?` (${fnum(flowCount)} flows)`:''}`;
+        }else{
+          E("val-money").textContent="n/a";
+          E("desc-money").textContent="No flagged transaction flows";
+        }
+      }
+    }else{
+      // Demo mode: standard demo figure
+      const fv=ds.fraud_volume!==undefined?ds.fraud_volume:3029456.92;
+      E("val-money").textContent=inr(fv);
+      E("desc-money").textContent="0.60% of G2P Welfare Outlays";
+    }
+
+    if(isUp&&!isUploadActive){
+      setUploadActiveUI(ds,ds.dataset_name);
+    }else if(!isUp&&isUploadActive){
       setDemoActiveUI();
     }
     hideErr();
@@ -1204,10 +1259,18 @@ async function loadMetrics(){
     console.error(err);
     showErr("Failed to fetch metrics");
     if(!isUploadActive){
-      E("val-tx").textContent="50,000";E("val-acct").textContent="82";E("val-money").textContent="₹30,29,456.92";
+      E("val-tx").textContent="50,000";
+      E("desc-tx").textContent="144 Time Windows · G2P Transfers";
+      E("val-acct").textContent="82";
+      E("val-money").textContent="₹30,29,456.92";
+      E("desc-money").textContent="0.60% of G2P Welfare Outlays";
+    }else{
+      E("val-money").textContent="n/a";
+      E("desc-money").textContent="n/a";
     }
   }
 }
+
 
 // Strict DOM Sanitization for alerts
 async function loadAlerts(){
